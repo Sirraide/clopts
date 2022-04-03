@@ -42,6 +42,11 @@ struct static_string {
 	[[nodiscard]] constexpr auto sv() const -> std::string_view { return {data, len}; }
 };
 
+void print_help_and_exit(void* msg) {
+	std::cerr << *reinterpret_cast<std::string*>(msg);
+	std::exit(0);
+}
+
 template <static_string _name, static_string _description = "", typename _type = std::string, bool required = false>
 struct option {
 	static_assert(sizeof _description.data < 512, "Description may not be longer than 512 characters");
@@ -52,7 +57,7 @@ struct option {
 					  || std::is_same_v<_type, bool>	//
 					  || std::is_same_v<_type, double>	//
 					  || std::is_same_v<_type, int64_t> //
-					  || std::is_same_v<_type, void (*)()>,
+					  || std::is_same_v<_type, void (*)(void*)>,
 		"Option type must be std::string, bool, int64_t, double, or void(*)()");
 
 	using type												   = _type;
@@ -64,9 +69,10 @@ struct option {
 	constexpr option() = delete;
 };
 
-template <static_string _name, static_string _description, void (*f)(), bool required = false>
-struct func : public option<_name, _description, void (*)(), required> {
+template <static_string _name, static_string _description, void (*f)(void*), bool required = false, void* arg = nullptr>
+struct func : public option<_name, _description, void (*)(void*), required> {
 	static constexpr inline decltype(f) callback = f;
+	static inline void*					argument = arg;
 
 	constexpr func() = delete;
 };
@@ -74,6 +80,11 @@ struct func : public option<_name, _description, void (*)(), required> {
 template <static_string _name, static_string _description = "", bool required = false>
 struct flag : public option<_name, _description, bool, required> {
 	constexpr flag() = delete;
+};
+
+struct help : public func<"--help", "Print this help information", print_help_and_exit> {
+	constexpr help()							= delete;
+	static constexpr inline bool is_help_option = true;
 };
 
 template <typename... opts>
@@ -97,7 +108,7 @@ struct clopts {
 	using help_string_t = static_string<1024 * sizeof...(opts)>;
 	using string		= std::string;
 	using integer		= int64_t;
-	using callback		= void (*)();
+	using callback		= void (*)(void*);
 
 	template <static_string s, typename... options>
 	struct type_of;
@@ -313,7 +324,10 @@ struct clopts {
 		else if constexpr (std::is_same_v<typename option::type, callback>) {
 			if (opt_str != opt_name.sv()) return false;
 			get<opt_name>(options).found = true;
-			option::callback();
+			if constexpr (requires { option::is_help_option; }) {
+				std::string h = help();
+				option::callback((void*) &h);
+			} else option::callback(option::argument);
 			return true;
 		}
 
@@ -377,7 +391,7 @@ struct clopts {
 	}
 };
 
-} // namespace clopts
+} // namespace command_line_options
 
 #undef CONSTEXPR_NOT_IMPLEMENTED
 
