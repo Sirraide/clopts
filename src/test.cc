@@ -1,4 +1,5 @@
 #include "../include/clopts.hh"
+using namespace command_line_options;
 
 static void print_42_and_exit() {
 	std::cout << 42;
@@ -7,8 +8,8 @@ static void print_42_and_exit() {
 
 using options = clopts< // clang-format off
 	option<"--filename", "The name of the file", std::string, true>,
-	option<"--frobnicate", "Whether to frobnicate", bool>,
 	option<"--size", "The size of the file", int64_t>,
+	flag<"--frobnicate", "Whether to frobnicate">,
 	func<"--lambda", "Print 42 and exit", print_42_and_exit>
 >; // clang-format on
 

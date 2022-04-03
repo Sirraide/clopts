@@ -9,6 +9,8 @@
 	[]<bool x = false> { static_assert(x, msg); } \
 	()
 
+namespace command_line_options {
+
 template <size_t sz>
 struct static_string {
 	char   data[sz]{};
@@ -67,6 +69,11 @@ struct func : public option<_name, _description, void (*)(), required> {
 	static constexpr inline decltype(f) callback = f;
 
 	constexpr func() = delete;
+};
+
+template <static_string _name, static_string _description = "", bool required = false>
+struct flag : public option<_name, _description, bool, required> {
+	constexpr flag() = delete;
 };
 
 template <typename... opts>
@@ -369,5 +376,9 @@ struct clopts {
 		return options;
 	}
 };
+
+} // namespace clopts
+
+#undef CONSTEXPR_NOT_IMPLEMENTED
 
 #endif // CLOPTS_H
