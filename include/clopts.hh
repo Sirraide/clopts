@@ -20,7 +20,7 @@ struct static_string {
 		len = sz - 1;
 	}
 
-	template<typename str>
+	template <typename str>
 	[[nodiscard]] constexpr bool operator==(const str& s) const { return len == s.len && __builtin_strcmp(data, s.data) == 0; }
 
 	template <size_t n>
@@ -46,11 +46,12 @@ struct option {
 	static_assert(_name.len > 0, "Option name may not be empty");
 	static_assert(sizeof _name.data < 256, "Option name may not be longer than 256 characters");
 	static_assert(!std::is_void_v<_type>, "Option type may not be void. Use bool instead");
-	static_assert(std::is_same_v<_type, std::string>   //
-					  || std::is_same_v<_type, bool>   //
-					  || std::is_same_v<_type, double> //
-					  || std::is_same_v<_type, int64_t>,
-		"Option type must be std::string, bool, int64_t, or double");
+	static_assert(std::is_same_v<_type, std::string>	//
+					  || std::is_same_v<_type, bool>	//
+					  || std::is_same_v<_type, double>	//
+					  || std::is_same_v<_type, int64_t> //
+					  || std::is_same_v<_type, void (*)()>,
+		"Option type must be std::string, bool, int64_t, double, or void(*)()");
 
 	using type												   = _type;
 	static constexpr inline decltype(_name)		   name		   = _name;
@@ -59,6 +60,13 @@ struct option {
 	static constexpr inline bool				   is_required = required;
 
 	constexpr option() = delete;
+};
+
+template <static_string _name, static_string _description, void (*f)(), bool required = false>
+struct func : public option<_name, _description, void (*)(), required> {
+	static constexpr inline decltype(f) callback = f;
+
+	constexpr func() = delete;
 };
 
 template <typename... opts>
@@ -82,22 +90,23 @@ struct clopts {
 	using help_string_t = static_string<1024 * sizeof...(opts)>;
 	using string		= std::string;
 	using integer		= int64_t;
+	using callback		= void (*)();
 
-	template<static_string s, typename ...options>
+	template <static_string s, typename... options>
 	struct type_of;
 
-	template<static_string s, typename option, typename option2>
+	template <static_string s, typename option, typename option2>
 	struct type_of<s, option, option2> {
 		using type = std::conditional_t<s == option::name, typename option::type, typename option2::type>;
 	};
 
-	template<static_string s, typename option, typename ...options>
+	template <static_string s, typename option, typename... options>
 	struct type_of<s, option, options...> {
 		using type = std::conditional_t<sizeof...(options) == 0 || s == option::name, typename option::type,
 			typename type_of<s, options...>::type>;
 	};
 
-	template<static_string s>
+	template <static_string s>
 	using type_of_t = typename type_of<s, opts...>::type;
 
 	struct parsed_options {
@@ -128,12 +137,13 @@ struct clopts {
 			return options[k];
 		}
 
-		template<static_string s>
+		template <static_string s>
 		[[nodiscard]] auto get() -> type_of_t<s> {
-			using value_type = type_of_t<s>;
+			using value_type		   = type_of_t<s>;
 			static const std::string k = as_std_string<decltype(s), s>();
 			assert_has_key<decltype(s), s>();
 			if constexpr (std::is_same_v<value_type, bool>) return options.at(k).found;
+			if constexpr (std::is_same_v<value_type, callback>) CONSTEXPR_NOT_IMPLEMENTED("Cannot call get<>() on an option with function type.");
 			else return std::get<value_type>(options.at(k).value);
 		}
 
@@ -144,7 +154,7 @@ struct clopts {
 			return options.at(k).found;
 		}
 
-		template<static_string s>
+		template <static_string s>
 		[[nodiscard]] auto has() const -> bool {
 			static const std::string k = as_std_string<decltype(s), s>();
 			assert_has_key<decltype(s), s>();
@@ -156,6 +166,7 @@ struct clopts {
 			static const std::string k = as_std_string<decltype(opt_name), opt_name>();
 			assert_has_key<decltype(opt_name), opt_name>();
 			if constexpr (std::is_same_v<type, bool>) s << k << ":" << std::boolalpha << options.at(k).found << "\n";
+			if constexpr (std::is_same_v<type, callback>) s << k << "\n";
 			else s << k << ":" << std::get<type>(options.at(k).value) << "\n";
 		}
 
@@ -226,7 +237,8 @@ struct clopts {
 		else if constexpr (std::is_same_v<t, bool>) buffer.append("bool");
 		else if constexpr (std::is_same_v<t, integer>) buffer.append("number");
 		else if constexpr (std::is_same_v<t, double>) buffer.append("number");
-		else CONSTEXPR_NOT_IMPLEMENTED("Option type must be std::string, bool, integer, or double");
+		else if constexpr (std::is_same_v<t, callback>) buffer.append("function");
+		else CONSTEXPR_NOT_IMPLEMENTED("Option type must be std::string, bool, integer, double, or void(*)()");
 		return buffer;
 	}
 
@@ -258,10 +270,12 @@ struct clopts {
 				handle_error(s + " does not appear to be a valid floating-point number");
 				return {};
 			}
-		} else CONSTEXPR_NOT_IMPLEMENTED("Option argument must be std::string, integer, or double");
+
+		} else if constexpr (std::is_same_v<type, callback>) CONSTEXPR_NOT_IMPLEMENTED("Cannot make function arg.");
+		else CONSTEXPR_NOT_IMPLEMENTED("Option argument must be std::string, integer, double, or void(*)()");
 	}
 
-	template <typename type, static_string opt_name>
+	template <typename option, static_string opt_name>
 	static bool handle_option(parsed_options& options, std::string opt_str) {
 		auto check_duplicate = [&] {
 			if (has<opt_name>(options)) {
@@ -282,11 +296,21 @@ struct clopts {
 		if (!check_duplicate()) return false;
 
 		/// Flags don't have arguments.
-		if constexpr (std::is_same_v<type, bool>) {
+		if constexpr (std::is_same_v<typename option::type, bool>) {
 			if (opt_str != opt_name.sv()) return false;
 			get<opt_name>(options).found = true;
 			return true;
-		} else {
+		}
+
+		/// If this is a function argument, simply call the callback and we're done
+		else if constexpr (std::is_same_v<typename option::type, callback>) {
+			if (opt_str != opt_name.sv()) return false;
+			get<opt_name>(options).found = true;
+			option::callback();
+			return true;
+		}
+
+		else {
 			/// Both --option value and --option=value are
 			/// valid ways of supplying a value. Test for
 			/// both of them.
@@ -296,7 +320,7 @@ struct clopts {
 				if (opt_str[opt_name.size()] != '=') return false;
 				auto opt_start_offs			 = opt_name.size() + 1;
 				get<opt_name>(options).found = true;
-				get<opt_name>(options).value = make_arg<type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
+				get<opt_name>(options).value = make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
 				return true;
 			}
 
@@ -306,7 +330,7 @@ struct clopts {
 				return false;
 			}
 			get<opt_name>(options).found = true;
-			get<opt_name>(options).value = make_arg<type>(argv[argi], __builtin_strlen(argv[argi]));
+			get<opt_name>(options).value = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
 			return true;
 		}
 	}
@@ -324,7 +348,6 @@ struct clopts {
 		return true;
 	}
 
-
 	static auto parse(int _argc, char** _argv) -> parsed_options {
 		parsed_options options;
 		argc = _argc;
@@ -333,7 +356,7 @@ struct clopts {
 		for (argi = 1; argi < argc; argi++) {
 			const std::string opt_str{argv[argi], __builtin_strlen(argv[argi])};
 
-			if (!(handle_option<typename opts::type, opts::name>(options, opt_str) || ...)) {
+			if (!(handle_option<opts, opts::name>(options, opt_str) || ...)) {
 				std::string errmsg;
 				errmsg += "Unrecognized option: \"";
 				errmsg += opt_str;
@@ -346,6 +369,5 @@ struct clopts {
 		return options;
 	}
 };
-
 
 #endif // CLOPTS_H
