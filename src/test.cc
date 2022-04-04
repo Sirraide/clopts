@@ -6,6 +6,12 @@ static void print_42_and_exit(void*) {
 	std::exit(0);
 }
 
+/// TODO:
+///  - multiple<option<"--filename", "The name of the file", std::string, true>> => std::vector<std::string>
+///	 - alias<"-f", "--filename">
+///  - positional<0, "The destination port", int64_t>
+///        - Absolute vs relative position?
+
 using options = clopts< // clang-format off
 	option<"--filename", "The name of the file", std::string, true>,
 	option<"--size", "The size of the file", int64_t>,
