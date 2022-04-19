@@ -214,7 +214,8 @@ struct clopts {
 		size_t max_len{};
 		auto   determine_max_len = [&]<typename opt> {
 			  if constexpr (requires { opt::is_positional; }) return;
-			  size_t combined_len = opt::name.len + (type_name<typename opt::type>().len + 3) * !opt::is_flag;
+			  size_t combined_len = opt::name.len;
+			  if constexpr (!opt::is_flag && !std::is_same_v<typename opt::type, callback>) combined_len += (type_name<typename opt::type>().len + 3);
 			  if (combined_len > max_len) max_len = combined_len;
 		};
 		(determine_max_len.template operator()<opts>(), ...);
@@ -237,13 +238,14 @@ struct clopts {
 			if constexpr (requires { opt::is_positional; }) return;
 
 			/// Compute the padding for this option.
-			const auto	 tname	 = type_name<typename opt::type>();
-			const size_t len	 = opt::name.len + (3 + tname.len) * !opt::is_flag;
-			const size_t padding = max_len - len;
+			const auto tname = type_name<typename opt::type>();
+			size_t	   len	 = opt::name.len;
+			if constexpr (!opt::is_flag && !std::is_same_v<typename opt::type, callback>) len += (3 + tname.len);
+			size_t padding = max_len - len;
 			/// Append the name and the type arg if this is not a bool option.
 			msg.append("    ");
 			msg.append(opt::name.data, opt::name.len);
-			if (!opt::is_flag) {
+			if constexpr (!opt::is_flag && !std::is_same_v<typename opt::type, callback>) {
 				msg.append(" <");
 				msg.append(tname.data, tname.len);
 				msg.append(">");
