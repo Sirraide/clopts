@@ -42,6 +42,8 @@ struct static_string {
 	[[nodiscard]] constexpr auto sv() const -> std::string_view { return {data, len}; }
 };
 
+/// This is a template just so that the compiler merges multiple definitions.
+template<bool = true>
 void print_help_and_exit(void* msg) {
 	std::cerr << *reinterpret_cast<std::string*>(msg);
 	std::exit(0);
@@ -161,7 +163,7 @@ struct clopts {
 		}
 
 		template <static_string s>
-		[[nodiscard]] auto get() -> type_of_t<s> {
+		[[nodiscard]] auto get() const -> type_of_t<s> {
 			using value_type		   = type_of_t<s>;
 			static const std::string k = as_std_string<decltype(s), s>();
 			assert_has_key<decltype(s), s>();
