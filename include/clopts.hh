@@ -69,6 +69,11 @@ struct option {
 	constexpr option() = delete;
 };
 
+template <static_string _name, static_string _description, typename _type = std::string, bool required = true>
+struct positional : option<_name, _description, _type, required> {
+	static constexpr inline bool is_positional = true;
+};
+
 template <static_string _name, static_string _description, void (*f)(void*), bool required = false, void* arg = nullptr>
 struct func : public option<_name, _description, void (*)(void*), required> {
 	static constexpr inline decltype(f) callback = f;
@@ -205,25 +210,38 @@ struct clopts {
 
 		/// Determine the length of the longest name + typename.
 		size_t max_len{};
-		([&](size_t l, size_t tlen, bool is_flag) {
-			size_t combined_len = l + (tlen + 3) * !is_flag;
-			if (combined_len > max_len) max_len = combined_len;
-		}(opts::name.len, type_name<typename opts::type>().len, opts::is_flag),
-			...);
+		auto   determine_max_len = [&]<typename opt> {
+			  if constexpr (requires { opt::is_positional; }) return;
+			  size_t combined_len = opt::name.len + (type_name<typename opt::type>().len + 3) * !opt::is_flag;
+			  if (combined_len > max_len) max_len = combined_len;
+		};
+		(determine_max_len.template operator()<opts>(), ...);
 
-		/// Construct the help message.
-		msg.append("Options:\n");
+		/// Append the positional options.
+		msg.append(" ");
+		auto append_positional_options = [&]<typename opt> {
+			if constexpr (!requires { opt::is_positional; }) return;
+			msg.append("<");
+			msg.append(opt::name.data, opt::name.len);
+			msg.append("> ");
+		};
+		(append_positional_options.template operator()<opts>(), ...);
+		msg.append("[options]\n");
 
 		/// Append the options
-		([&](const char* name, size_t name_len, const char* descr, size_t descr_len, bool is_flag) {
+		msg.append("Options:\n");
+		auto append_option = [&]<typename opt> {
+			/// If this is a positional option, we don't want to append it here.
+			if constexpr (requires { opt::is_positional; }) return;
+
 			/// Compute the padding for this option.
-			const auto	 tname	 = type_name<typename opts::type>();
-			const size_t len	 = name_len + (3 + tname.len) * !is_flag;
+			const auto	 tname	 = type_name<typename opt::type>();
+			const size_t len	 = opt::name.len + (3 + tname.len) * !opt::is_flag;
 			const size_t padding = max_len - len;
 			/// Append the name and the type arg if this is not a bool option.
 			msg.append("    ");
-			msg.append(name, name_len);
-			if (!is_flag) {
+			msg.append(opt::name.data, opt::name.len);
+			if (!opt::is_flag) {
 				msg.append(" <");
 				msg.append(tname.data, tname.len);
 				msg.append(">");
@@ -232,10 +250,11 @@ struct clopts {
 			for (size_t i = 0; i < padding; i++) msg.append(" ");
 			msg.append("  ");
 			/// Append the description.
-			msg.append(descr, descr_len);
+			msg.append(opt::description.data, opt::description.len);
 			msg.append("\n");
-		}(opts::name.data, opts::name.len, opts::description.data, opts::description.len, opts::is_flag),
-			...);
+		};
+		(append_option.template operator()<opts>(), ...);
+
 		return msg;
 	};
 	static constexpr inline help_string_t help_message_raw = make_help_message();
@@ -244,6 +263,7 @@ struct clopts {
 
 	static inline std::function<bool(std::string&&)> handle_error = [](std::string&& errmsg) -> bool {
 		std::cerr << argv[0] << ": " << errmsg << "\n";
+		std::cerr << "Usage: " << argv[0];
 		std::cerr << help();
 		std::exit(1);
 	};
@@ -295,63 +315,82 @@ struct clopts {
 
 	template <typename option, static_string opt_name>
 	static bool handle_option(parsed_options& options, std::string opt_str) {
-		auto check_duplicate = [&] {
-			if (has<opt_name>(options)) {
-				std::string errmsg;
-				errmsg += "Duplicate option: \"";
-				errmsg += opt_str;
-				errmsg += "\"";
-				handle_error(std::move(errmsg));
-				return false;
-			}
-			return true;
-		};
-		auto sv = opt_name.sv();
-		/// If the supplied string doesn't start with the option name, move on to the next option
-		if (!opt_str.starts_with(sv)) return false;
-
-		/// Duplicate options are not allowed by default.
-		if (!check_duplicate()) return false;
-
-		/// Flags don't have arguments.
-		if constexpr (std::is_same_v<typename option::type, bool>) {
-			if (opt_str != opt_name.sv()) return false;
-			get<opt_name>(options).found = true;
-			return true;
-		}
-
-		/// If this is a function argument, simply call the callback and we're done
-		else if constexpr (std::is_same_v<typename option::type, callback>) {
-			if (opt_str != opt_name.sv()) return false;
-			get<opt_name>(options).found = true;
-			if constexpr (requires { option::is_help_option; }) {
-				std::string h = help();
-				option::callback((void*) &h);
-			} else option::callback(option::argument);
-			return true;
-		}
-
+		/// This function only handles named options.
+		if constexpr (requires { option::is_positional; }) return false;
 		else {
-			/// Both --option value and --option=value are
-			/// valid ways of supplying a value. Test for
-			/// both of them.
+			auto check_duplicate = [&] {
+				if (has<opt_name>(options)) {
+					std::string errmsg;
+					errmsg += "Duplicate option: \"";
+					errmsg += opt_str;
+					errmsg += "\"";
+					handle_error(std::move(errmsg));
+					return false;
+				}
+				return true;
+			};
+			auto sv = opt_name.sv();
+			/// If the supplied string doesn't start with the option name, move on to the next option
+			if (!opt_str.starts_with(sv)) return false;
 
-			/// --option=value
-			if (opt_str.size() > opt_name.size()) {
-				if (opt_str[opt_name.size()] != '=') return false;
-				auto opt_start_offs			 = opt_name.size() + 1;
+			/// Duplicate options are not allowed by default.
+			if (!check_duplicate()) return false;
+
+			/// Flags don't have arguments.
+			if constexpr (std::is_same_v<typename option::type, bool>) {
+				if (opt_str != opt_name.sv()) return false;
 				get<opt_name>(options).found = true;
-				get<opt_name>(options).value = make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
 				return true;
 			}
 
-			/// --option value
-			if (++argi == argc) {
-				handle_error(std::string{"Missing argument for option \""} + opt_str + "\"");
-				return false;
+			/// If this is a function argument, simply call the callback and we're done
+			else if constexpr (std::is_same_v<typename option::type, callback>) {
+				if (opt_str != opt_name.sv()) return false;
+				get<opt_name>(options).found = true;
+				if constexpr (requires { option::is_help_option; }) {
+					std::string h = help();
+					option::callback((void*) &h);
+				} else option::callback(option::argument);
+				return true;
 			}
-			get<opt_name>(options).found = true;
-			get<opt_name>(options).value = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
+
+			else {
+				/// Both --option value and --option=value are
+				/// valid ways of supplying a value. Test for
+				/// both of them.
+
+				/// --option=value
+				if (opt_str.size() > opt_name.size()) {
+					if (opt_str[opt_name.size()] != '=') return false;
+					auto opt_start_offs			 = opt_name.size() + 1;
+					get<opt_name>(options).found = true;
+					get<opt_name>(options).value = make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
+					return true;
+				}
+
+				/// --option value
+				if (++argi == argc) {
+					handle_error(std::string{"Missing argument for option \""} + opt_str + "\"");
+					return false;
+				}
+				get<opt_name>(options).found = true;
+				get<opt_name>(options).value = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
+				return true;
+			}
+		}
+	}
+
+	template <typename opt>
+	static bool handle_positional(parsed_options& options, std::string opt_str) {
+		/// This function only cares about positional options.
+		if constexpr (!requires { opt::is_positional; }) return false;
+		else {
+			/// If we've already encountered this positional option, then return.
+			if (has<opt::name>(options)) return false;
+
+			/// Otherwise, attempt to parse this as the option value.
+			get<opt::name>(options).found = true;
+			get<opt::name>(options).value = make_arg<typename opt::type>(opt_str.data(), opt_str.size());
 			return true;
 		}
 	}
@@ -378,11 +417,13 @@ struct clopts {
 			const std::string opt_str{argv[argi], __builtin_strlen(argv[argi])};
 
 			if (!(handle_option<opts, opts::name>(options, opt_str) || ...)) {
-				std::string errmsg;
-				errmsg += "Unrecognized option: \"";
-				errmsg += opt_str;
-				errmsg += "\"";
-				if (!handle_error(std::move(errmsg))) break;
+				if (!(handle_positional<opts>(options, opt_str) || ...)) {
+					std::string errmsg;
+					errmsg += "Unrecognized option: \"";
+					errmsg += opt_str;
+					errmsg += "\"";
+					if (!handle_error(std::move(errmsg))) break;
+				}
 			}
 		}
 

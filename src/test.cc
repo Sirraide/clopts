@@ -9,12 +9,11 @@ static void print_42_and_exit(void*) {
 /// TODO:
 ///  - multiple<option<"--filename", "The name of the file", std::string, true>> => std::vector<std::string>
 ///	 - alias<"-f", "--filename">
-///  - positional<0, "The destination port", int64_t>
-///        - Absolute vs relative position?
 
 using options = clopts< // clang-format off
 	option<"--filename", "The name of the file", std::string, true>,
 	option<"--size", "The size of the file", int64_t>,
+	positional<"foobar", "Foobar description goes here">,
 	flag<"--frobnicate", "Whether to frobnicate">,
 	func<"--lambda", "Print 42 and exit", print_42_and_exit>,
 	help
@@ -22,5 +21,5 @@ using options = clopts< // clang-format off
 
 int main(int argc, char** argv) {
 	auto opts = options::parse(argc, argv);
-	std::cout << opts.get<"--filename">();
+	std::cout << opts.get<"foobar">();
 }
