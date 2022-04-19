@@ -43,7 +43,7 @@ struct static_string {
 };
 
 /// This is a template just so that the compiler merges multiple definitions.
-template<bool = true>
+template <bool = true>
 void print_help_and_exit(void* msg) {
 	std::cerr << *reinterpret_cast<std::string*>(msg);
 	std::exit(0);
@@ -261,11 +261,15 @@ struct clopts {
 	};
 	static constexpr inline help_string_t help_message_raw = make_help_message();
 
-	static auto help() -> std::string { return std::string{help_message_raw.data, help_message_raw.len}; }
+	static auto help() -> std::string {
+		std::string msg = "Usage: ";
+		msg += argv[0];
+		msg.append(help_message_raw.data, help_message_raw.len);
+		return msg;
+	}
 
 	static inline std::function<bool(std::string&&)> handle_error = [](std::string&& errmsg) -> bool {
 		std::cerr << argv[0] << ": " << errmsg << "\n";
-		std::cerr << "Usage: " << argv[0];
 		std::cerr << help();
 		std::exit(1);
 	};
