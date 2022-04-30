@@ -5,7 +5,7 @@
 #include <map>
 #include <variant>
 
-#define CONSTEXPR_NOT_IMPLEMENTED(msg)            \
+#define RAISE_COMPILE_ERROR(msg)            \
 	[]<bool x = false> { static_assert(x, msg); } \
 	()
 
@@ -76,7 +76,7 @@ struct positional : option<_name, _description, _type, required> {
 	static constexpr inline bool is_positional = true;
 };
 
-template <static_string _name, static_string _description, void (*f)(void*), bool required = false, void* arg = nullptr>
+template <static_string _name, static_string _description, void (*f)(void*), void* arg = nullptr, bool required = false>
 struct func : public option<_name, _description, void (*)(void*), required> {
 	static constexpr inline decltype(f) callback = f;
 	static inline void*					argument = arg;
@@ -168,7 +168,7 @@ struct clopts {
 			static const std::string k = as_std_string<decltype(s), s>();
 			assert_has_key<decltype(s), s>();
 			if constexpr (std::is_same_v<value_type, bool>) return options.at(k).found;
-			if constexpr (std::is_same_v<value_type, callback>) CONSTEXPR_NOT_IMPLEMENTED("Cannot call get<>() on an option with function type.");
+			if constexpr (std::is_same_v<value_type, callback>) RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
 			else return std::get<value_type>(options.at(k).value);
 		}
 
@@ -284,7 +284,7 @@ struct clopts {
 		else if constexpr (std::is_same_v<t, integer>) buffer.append("number");
 		else if constexpr (std::is_same_v<t, double>) buffer.append("number");
 		else if constexpr (std::is_same_v<t, callback>) buffer.append("function");
-		else CONSTEXPR_NOT_IMPLEMENTED("Option type must be std::string, bool, integer, double, or void(*)()");
+		else RAISE_COMPILE_ERROR("Option type must be std::string, bool, integer, double, or void(*)()");
 		return buffer;
 	}
 
@@ -317,8 +317,8 @@ struct clopts {
 				return {};
 			}
 
-		} else if constexpr (std::is_same_v<type, callback>) CONSTEXPR_NOT_IMPLEMENTED("Cannot make function arg.");
-		else CONSTEXPR_NOT_IMPLEMENTED("Option argument must be std::string, integer, double, or void(*)()");
+		} else if constexpr (std::is_same_v<type, callback>) RAISE_COMPILE_ERROR("Cannot make function arg.");
+		else RAISE_COMPILE_ERROR("Option argument must be std::string, integer, double, or void(*)()");
 	}
 
 	template <typename option, static_string opt_name>
@@ -442,6 +442,6 @@ struct clopts {
 
 } // namespace command_line_options
 
-#undef CONSTEXPR_NOT_IMPLEMENTED
+#undef RAISE_COMPILE_ERROR
 
 #endif // CLOPTS_H

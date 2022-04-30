@@ -1,8 +1,10 @@
 #include "../include/clopts.hh"
 using namespace command_line_options;
 
-static void print_42_and_exit(void*) {
-	std::cout << 42;
+int x = 42;
+static void print_42_and_exit(void* arg) {
+	int* i = reinterpret_cast<int*>(arg);
+	std::cout << *i;
 	std::exit(0);
 }
 
@@ -15,11 +17,15 @@ using options = clopts< // clang-format off
 	option<"--size", "The size of the file", int64_t>,
 	positional<"foobar", "Foobar description goes here">,
 	flag<"--frobnicate", "Whether to frobnicate">,
-	func<"--lambda", "Print 42 and exit", print_42_and_exit>,
+	func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
 	help
 >; // clang-format on
 
 int main(int argc, char** argv) {
+	options::handle_error = [&](std::string&& errmsg) {
+		std::cerr << "PANIC: " << errmsg;
+		return false;
+	};
 	auto opts = options::parse(argc, argv);
-	std::cout << opts.get<"foobar">();
+	if (opts.has<"--func">()) std::cout << opts.get<"--size">() << "\n";
 }
