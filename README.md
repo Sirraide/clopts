@@ -21,18 +21,18 @@ using namespace command_line_options;
 
 int x = 42;
 static void print_42_and_exit(void* arg) {
-	int* i = reinterpret_cast<int*>(arg);
-	std::cout << *i;
-	std::exit(0);
+    int* i = reinterpret_cast<int*>(arg);
+    std::cout << *i;
+    std::exit(0);
 }
 
 using options = clopts<
-	option<"--filename", "The name of the file", std::string, true>,
-	option<"--size", "The size of the file", int64_t>,
-	positional<"foobar", "Foobar description goes here">,
-	flag<"--frobnicate", "Whether to frobnicate">,
-	func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
-	help
+    option<"--filename", "The name of the file", std::string, true>,
+    option<"--size", "The size of the file", int64_t>,
+    positional<"foobar", "Foobar description goes here">,
+    flag<"--frobnicate", "Whether to frobnicate">,
+    func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
+    help
 >;
 
 int main(int argc, char** argv) {
@@ -138,7 +138,7 @@ using options = clopts<
     option<"--size", "The size of the file", int64_t>,
     positional<"foobar", "Description goes here">,
     flag<"--frobnicate", "Whether to frobnicate">,
->;	    
+>;        
 ```
 
 The options themselves are also templates. What parameters they take depends
@@ -200,9 +200,9 @@ to the callback in the form of a `void*`.
 ```c++
 int x = 42;
 static void print_42_and_exit(void* arg) {
-	int* i = reinterpret_cast<int*>(arg);
-	std::cout << *i;
-	std::exit(0);
+    int* i = reinterpret_cast<int*>(arg);
+    std::cout << *i;
+    std::exit(0);
 }
 
 func<"--print42", "Print 42 and exit", print_42_and_exit, (void*) &x>,
