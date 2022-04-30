@@ -6,7 +6,7 @@ a parser and a formatted help message at compile time.
 It also ensures that your program doesn't compile if you, for instance, 
 misspell the name of an option when trying to access its value.
 
-Both `--option=value` and `--option=value` are supported.
+Both `--option value` and `--option=value` are supported.
 
 ## Build
 You only need to `#include "include/clopts.hh"` and then you're good to go.
