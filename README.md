@@ -113,7 +113,7 @@ errors that would make the options unparseable or ill-formed, such as having
 two different options with the same name, or trying to call `get<>()` on an
 option that doesn't exist, are compile-time errors.
 
-When an error is encountered, the parser invokes the option type's error
+When an error is encountered, the parser invokes your `clopts` type's error
 handler, which, by default, prints the error, the help message, and then
 exits the program with code `1`.
 
