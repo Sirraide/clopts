@@ -207,7 +207,7 @@ static void print_42_and_exit(void* arg) {
 func<"--print42", "Print 42 and exit", print_42_and_exit, (void*) &x>,
 ```
 
-It is an error to call `get<>()` on an option with function type.
+It is a compile-time error to call `get<>()` on an option with function type.
 
 ### positional
 Positional arguments are arguments that do not have a name on the command
