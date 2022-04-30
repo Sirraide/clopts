@@ -183,18 +183,12 @@ In the case of `int64_t`, the argument must be a valid 64-bit integer.
 Both `--option value` and `--option=value` are recognised by the parser.
 
 ### flag
-A `flag` is the equivalent to an `option` of type `bool`. Flags have no
+A `flag` is equivalent to an `option` of type `bool`. Flags have no
 argument: they're `true` when they're present, and `false` otherwise. For
 flags, calling `has<>()` has the same effect as calling `get<>()`.
 ```c++
 flag<"--name", "Description">
 flag<"--name", "Description", /* required? */ true>
-```
-
-These are equivalent to:
-```c++
-option<"--name", "Description", bool>
-option<"--name", "Description", bool, /* required? */ true>
 ```
 
 ### func
