@@ -17,5 +17,5 @@ else ()
     target_compile_options(options INTERFACE -O0 -ggdb)
 endif ()
 
-add_executable(test src/test.cc include/clopts.hh)
+add_executable(test test.cc ../include/clopts.hh)
 target_link_libraries(test PRIVATE options)
