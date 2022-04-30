@@ -131,8 +131,8 @@ abort (that is, the parsing process, not the entire program).
 
 ## Option types
 This library comes with several builtin option types that are meant to
-address the most common use cases. You can also define your own custom option
-types by deriving from `option`, but more on that later.
+address the most common use cases. You can also define your own [custom option
+types](#custom-option-types) by deriving from `option`, but more on that later.
 
 Depending on the [type](#type), some options take arguments, others don't.
 
@@ -248,3 +248,19 @@ calling `get<"baz">()` always returns `"opt2"`.
 This is a special option type that takes no arguments and adds a `--help`
 option that simply prints a help message containing the names, types, and
 descriptions of all options and then exits the program.
+
+### Custom Option Types
+You can define custom option types by inheriting from `option`. For instance
+the builtin `flag` type is defined as
+```c++
+template <static_string _name, static_string _description = "", bool required = false>
+struct flag : public option<_name, _description, bool, required> {
+    constexpr flag() = delete;
+};
+```
+
+Make sure to use `static_string` if you want to be able to pass a string
+literal as a non-type template parameter.
+
+However, keep in mind that implementing certain features, like the `func` 
+type, would also require modifying the parser. 
