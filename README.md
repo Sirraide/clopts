@@ -209,9 +209,6 @@ func<"--print42", "Print 42 and exit", print_42_and_exit, (void*) &x>,
 
 It is an error to call `get<>()` on an option with function type.
 
-Unlike `flag`, it is not possible to use the `option` template directly to 
-create a `func` option.
-
 ### positional
 Positional arguments are arguments that do not have a name on the command
 line. If the parser encounters an option that it does not recognise, it
