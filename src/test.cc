@@ -26,6 +26,7 @@ int main(int argc, char** argv) {
 		std::cerr << "PANIC: " << errmsg;
 		return false;
 	};
+
 	auto opts = options::parse(argc, argv);
 	if (opts.has<"--func">()) std::cout << opts.get<"--size">() << "\n";
 }

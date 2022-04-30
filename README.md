@@ -86,8 +86,13 @@ if (opts.has<"--size">()) {
 }
 ```
 
-Failing to do so may, but need not, throw a `std::bad_variant_access` 
-exception if the option is not present.
+Trying to call `opts.get<"--size">()` if `opts.has<"--size">()` returns
+`false` may, but need not, throw a `std::bad_variant_access` exception.
+
+Note that `opts.has<"--size">()` checks whether the `--size` option was 
+encountered by the parser, i.e. whether the user specified it on the command
+line. If instead no option with the name `--size` exists, you'll get a 
+compile-time error instead.
 
 You can then get the value of an option by passing the name of the option to
 the `get<>` function template and calling it.
