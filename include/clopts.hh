@@ -131,6 +131,11 @@ struct clopts {
 	template <static_string s, typename... options>
 	struct type_of;
 
+	template <static_string s, typename option>
+	struct type_of<s, option> {
+		using type = typename option::type;
+	};
+
 	template <static_string s, typename option, typename option2>
 	struct type_of<s, option, option2> {
 		using type = std::conditional_t<s == option::name, typename option::type, typename option2::type>;

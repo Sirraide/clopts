@@ -33,9 +33,6 @@ if test $# -ge 1; then
     esac
 fi
 
-export CC=clang
-export CXX=clang++
-
 mkdir -p ./out
 cd out || die "cd error"
 cmake -DCMAKE_BUILD_TYPE="$build_type" .. -GNinja
