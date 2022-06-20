@@ -1,15 +1,25 @@
 #ifndef CLOPTS_H
 #define CLOPTS_H
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
 #include <functional>
 #include <iostream>
 #include <map>
+#include <string>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <variant>
 
-#define RAISE_COMPILE_ERROR(msg)            \
+#define RAISE_COMPILE_ERROR(msg)                  \
 	[]<bool x = false> { static_assert(x, msg); } \
 	()
 
 namespace command_line_options {
+
+/// Dummy type for file options.
+struct file_data {};
 
 template <size_t sz>
 struct static_string {
@@ -55,12 +65,13 @@ struct option {
 	static_assert(_name.len > 0, "Option name may not be empty");
 	static_assert(sizeof _name.data < 256, "Option name may not be longer than 256 characters");
 	static_assert(!std::is_void_v<_type>, "Option type may not be void. Use bool instead");
-	static_assert(std::is_same_v<_type, std::string>	//
-					  || std::is_same_v<_type, bool>	//
-					  || std::is_same_v<_type, double>	//
-					  || std::is_same_v<_type, int64_t> //
+	static_assert(std::is_same_v<_type, std::string>	  //
+					  || std::is_same_v<_type, bool>	  //
+					  || std::is_same_v<_type, double>	  //
+					  || std::is_same_v<_type, int64_t>	  //
+					  || std::is_same_v<_type, file_data> //
 					  || std::is_same_v<_type, void (*)(void*)>,
-		"Option type must be std::string, bool, int64_t, double, or void(*)()");
+		"Option type must be std::string, bool, int64_t, double, file_data, or void(*)()");
 
 	using type												   = _type;
 	static constexpr inline decltype(_name)		   name		   = _name;
@@ -134,6 +145,9 @@ struct clopts {
 	template <static_string s>
 	using type_of_t = typename type_of<s, opts...>::type;
 
+	template <typename t>
+	using value_type_t = std::conditional_t<std::is_same_v<t, file_data>, std::string, t>;
+
 	struct parsed_options {
 		struct option_data {
 			std::variant<std::string, int64_t, double> value;
@@ -163,8 +177,8 @@ struct clopts {
 		}
 
 		template <static_string s>
-		[[nodiscard]] auto get() const -> type_of_t<s> {
-			using value_type		   = type_of_t<s>;
+		[[nodiscard]] auto get() const -> value_type_t<type_of_t<s>> {
+			using value_type		   = value_type_t<type_of_t<s>>;
 			static const std::string k = as_std_string<decltype(s), s>();
 			assert_has_key<decltype(s), s>();
 			if constexpr (std::is_same_v<value_type, bool>) return options.at(k).found;
@@ -192,7 +206,7 @@ struct clopts {
 			assert_has_key<decltype(opt_name), opt_name>();
 			if constexpr (std::is_same_v<type, bool>) s << k << ":" << std::boolalpha << options.at(k).found << "\n";
 			if constexpr (std::is_same_v<type, callback>) s << k << "\n";
-			else s << k << ":" << std::get<type>(options.at(k).value) << "\n";
+			else s << k << ":" << std::get<value_type_t<type>>(options.at(k).value) << "\n";
 		}
 
 		std::ostream& dump(std::ostream& s) const {
@@ -283,6 +297,7 @@ struct clopts {
 		else if constexpr (std::is_same_v<t, bool>) buffer.append("bool");
 		else if constexpr (std::is_same_v<t, integer>) buffer.append("number");
 		else if constexpr (std::is_same_v<t, double>) buffer.append("number");
+		else if constexpr (std::is_same_v<t, file_data>) buffer.append("file");
 		else if constexpr (std::is_same_v<t, callback>) buffer.append("function");
 		else RAISE_COMPILE_ERROR("Option type must be std::string, bool, integer, double, or void(*)()");
 		return buffer;
@@ -298,10 +313,47 @@ struct clopts {
 		return o.template has_value<decltype(key), key>();
 	}
 
+#define ERR                                        \
+	do {                                           \
+		std::string msg = "Could not map file \""; \
+		msg += path;                               \
+		msg += "\": ";                             \
+		msg += ::strerror(errno);                  \
+		handle_error(std::move(msg));              \
+		return {};                                 \
+	} while (0)
+
+	static std::string map_file(std::string_view path) {
+		int fd = ::open(path.data(), O_RDONLY);
+		if (fd < 0) [[unlikely]]
+			ERR;
+
+		struct stat s {};
+		if (::fstat(fd, &s)) [[unlikely]]
+			ERR;
+		auto sz = size_t(s.st_size);
+		if (sz == 0) [[unlikely]]
+			ERR;
+
+		auto* mem = (char*) ::mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+		if (mem == MAP_FAILED) [[unlikely]]
+			ERR;
+
+		if (::close(fd)) [[unlikely]]
+			ERR;
+
+		std::string ret{mem, sz};
+		if (::munmap(mem, sz)) [[unlikely]]
+			ERR;
+
+		return ret;
+	}
+
 	template <typename type>
-	static type make_arg(const char* start, size_t len) {
+	static value_type_t<type> make_arg(const char* start, size_t len) {
 		std::string s{start, len};
 		if constexpr (std::is_same_v<type, std::string>) return s;
+		else if constexpr (std::is_same_v<type, file_data>) return map_file(s);
 		else if constexpr (std::is_same_v<type, int64_t>) {
 			try {
 				return std::stol(s);

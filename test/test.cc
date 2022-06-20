@@ -13,7 +13,7 @@ static void print_42_and_exit(void* arg) {
 ///	 - alias<"-f", "--filename">
 
 using options = clopts< // clang-format off
-	option<"--filename", "The name of the file", std::string, true>,
+	option<"--file", "The name of the file", file_data, true>,
 	option<"--size", "The size of the file", int64_t>,
 	positional<"foobar", "Foobar description goes here">,
 	flag<"--frobnicate", "Whether to frobnicate">,
@@ -28,5 +28,5 @@ int main(int argc, char** argv) {
 	};
 
 	auto opts = options::parse(argc, argv);
-	if (opts.has<"--func">()) std::cout << opts.get<"--size">() << "\n";
+	std::cout << opts.get<"--file">();
 }
