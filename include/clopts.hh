@@ -182,7 +182,7 @@ struct clopts {
 		}
 
 		template <static_string s>
-		[[nodiscard]] auto get() const -> value_type_t<type_of_t<s>> {
+		[[nodiscard]] auto get() -> value_type_t<type_of_t<s>>& {
 			using value_type		   = value_type_t<type_of_t<s>>;
 			static const std::string k = as_std_string<decltype(s), s>();
 			assert_has_key<decltype(s), s>();
