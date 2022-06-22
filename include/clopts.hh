@@ -220,6 +220,7 @@ struct clopts {
 		}
 	};
 
+	static inline bool	 has_error;
 	static inline int	 argc;
 	static inline int	 argi;
 	static inline char** argv;
@@ -289,11 +290,17 @@ struct clopts {
 		return msg;
 	}
 
-	static inline std::function<bool(std::string&&)> handle_error = [](std::string&& errmsg) -> bool {
+	/// This callback is called whenever an error occurs during parsing.
+	///
+	/// \param errmsg An error message that describes what went wrong.
+	/// \return `true` if the parsing process should continue, and `false` otherwise.
+	static inline std::function<bool(std::string&&)> error_handler = [](std::string&& errmsg) -> bool {
 		std::cerr << argv[0] << ": " << errmsg << "\n";
 		std::cerr << help();
 		std::exit(1);
 	};
+
+	static void handle_error(std::string&& msg) { has_error = !error_handler(std::move(msg)); }
 
 	template <typename t>
 	static constexpr auto type_name() -> static_string<100> {
@@ -475,10 +482,12 @@ struct clopts {
 
 	static auto parse(int _argc, char** _argv) -> parsed_options {
 		parsed_options options;
-		argc = _argc;
-		argv = _argv;
+		has_error = false;
+		argc	  = _argc;
+		argv	  = _argv;
 
 		for (argi = 1; argi < argc; argi++) {
+			if (has_error) return {};
 			const std::string opt_str{argv[argi], __builtin_strlen(argv[argi])};
 
 			if (!(handle_option<opts, opts::name>(options, opt_str) || ...)) {
@@ -487,7 +496,7 @@ struct clopts {
 					errmsg += "Unrecognized option: \"";
 					errmsg += opt_str;
 					errmsg += "\"";
-					if (!handle_error(std::move(errmsg))) break;
+					handle_error(std::move(errmsg));
 				}
 			}
 		}

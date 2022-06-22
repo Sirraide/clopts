@@ -27,22 +27,22 @@ static void print_42_and_exit(void* arg) {
 }
 
 using options = clopts<
-    option<"--filename", "The name of the file", std::string, true>,
-    option<"--size", "The size of the file", int64_t>,
-    positional<"foobar", "Foobar description goes here">,
-    flag<"--frobnicate", "Whether to frobnicate">,
-    func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
-    help
+	positional<"file", "The name of the file", file_data, true>,
+	positional<"foobar", "Foobar description goes here", std::string, false>,
+	option<"--size", "Size of something goes here", int64_t>,
+	flag<"--frobnicate", "Whether to frobnicate">,
+	func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
+	help
 >;
 
 int main(int argc, char** argv) {
-    options::handle_error = [&](std::string&& errmsg) {
-        std::cerr << "PANIC: " << errmsg;
-        return false;
-    };
-    
-    auto opts = options::parse(argc, argv);
-    if (opts.has<"--size">()) std::cout << opts.get<"--size">() << "\n";
+    options::error_handler = [&](std::string&& errmsg) {
+		std::cerr << "PANIC: " << errmsg;
+		return false;
+	};
+
+	auto opts = options::parse(argc, argv);
+	std::cout << opts.get<"file">();
 }
 ```
 
@@ -165,8 +165,17 @@ option<"--name", "Description", int64_t, /* required? */ true>
 #### Parameters
 * The option name, which must be a string literal (at most 256 bytes).
 * A description of the option, also a string literal (at most 512 bytes).
-* The type of the option (`bool`, `std::string`, `int64_t`, or 
-  `void (*)(void*)`). The default is `std::string`.
+* The type of the option (`bool`, `std::string`, `file_data` `int64_t`, or 
+  `void (*)(void*)`). The default is `std::string`.  
+  The `file_data` type is defined in the `command_line_options` namespace;
+  it is an empty struct, and its only purpose is to tell the parser to treat
+  the argument of this option as a filename; the actual value of this option
+  when accessed using `get<>()` is an `std::string` containing the contents 
+  of the file.  
+  If the parser can't load the file (for instance, because it 
+  doesn't exist), it will invoke the error handler with an appropriate message,
+  and the value of the option in the `parsed_options` struct will be left in an
+  indeterminate state.
 * Whether the option is required, i.e. whether omitting it is an error.
   The default is `false`.
 
@@ -215,6 +224,8 @@ line. If the parser encounters an option that it does not recognise, it
 will store it in the first positional argument that does not yet have
 a value.
 
+Positional arguments are required by default.
+
 By way of illustration, consider the following options:
 ```c++
 clopts<
@@ -239,6 +250,9 @@ calling `get<"baz">()` always returns `"opt2"`.
 This is a special option type that takes no arguments and adds a `--help`
 option that simply prints a help message containing the names, types, and
 descriptions of all options and then exits the program.
+
+This message can also be retrieved by calling the static `help()` function
+of the `clopts` type.
 
 ### Custom Option Types
 You can define custom option types by inheriting from `option`. For instance
