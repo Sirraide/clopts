@@ -27,17 +27,17 @@ static void print_42_and_exit(void* arg) {
 }
 
 using options = clopts<
-	positional<"file", "The name of the file", file_data, true>,
-	positional<"foobar", "Foobar description goes here", std::string, false>,
-	option<"--size", "Size of something goes here", int64_t>,
-	flag<"--frobnicate", "Whether to frobnicate">,
-	func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
-	help
+    positional<"file", "The name of the file", file_data, true>,
+    positional<"foobar", "Foobar description goes here", std::string, false>,
+    option<"--size", "Size of something goes here", int64_t>,
+    flag<"--frobnicate", "Whether to frobnicate">,
+    func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
+    help
 >;
 
 int main(int argc, char** argv) {
-	auto opts = options::parse(argc, argv);
-	std::cout << opts.get<"file">();
+    auto opts = options::parse(argc, argv);
+    std::cout << opts.get<"file">();
 }
 ```
 

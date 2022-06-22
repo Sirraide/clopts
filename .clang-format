@@ -3,8 +3,8 @@ BasedOnStyle: LLVM
 AccessModifierOffset: -4
 AlignAfterOpenBracket: DontAlign
 AlignConsecutiveMacros: Consecutive
-AlignConsecutiveAssignments: Consecutive
-AlignConsecutiveDeclarations: Consecutive
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
 AlignEscapedNewlines: Left
 AlignOperands: true
 AlignTrailingComments: true
@@ -51,6 +51,6 @@ SpaceBeforeParens: ControlStatements
 SpacesBeforeTrailingComments: 1
 SpacesInCStyleCastParentheses: false
 TabWidth: 4
-UseTab: Always
+UseTab: Never
 
 ...

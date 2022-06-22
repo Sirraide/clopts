@@ -3,12 +3,12 @@
 set -eu
 
 info() {
-	echo -e "\033[33m$1\033[m"
+    echo -e "\033[33m$1\033[m"
 }
 
 die() {
-	echo -e "\033[31m$1\033[m"
-	exit 1
+    echo -e "\033[31m$1\033[m"
+    exit 1
 }
 
 build_type="Release"
