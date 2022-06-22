@@ -36,15 +36,12 @@ using options = clopts<
 >;
 
 int main(int argc, char** argv) {
-    options::error_handler = [&](std::string&& errmsg) {
-		std::cerr << "PANIC: " << errmsg;
-		return false;
-	};
-
 	auto opts = options::parse(argc, argv);
 	std::cout << opts.get<"file">();
 }
 ```
+
+For how errors are handled, see the ‘Error Handling’ section below.
 
 ### Defining Options
 The `clopts` type is the top-level container for all of your options.
