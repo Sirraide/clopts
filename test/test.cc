@@ -24,9 +24,9 @@ using options = clopts< // clang-format off
 >; // clang-format on
 
 int main(int argc, char** argv) {
-    std::set_terminate(__gnu_cxx::__verbose_terminate_handler);
-
     auto opts = options::parse(argc, argv);
-    auto ints = opts.get<"--int">();
-    for (const auto& i : ints) std::cout << i << std::endl;
+    if (opts.has<"--int">()) {
+        auto ints = opts.get<"--int">();
+        for (const auto& i : ints) std::cout << i << std::endl;
+    }
 }

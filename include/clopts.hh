@@ -131,6 +131,7 @@ struct help : public func<"--help", "Print this help information", print_help_an
 template <typename opt>
 struct multiple : public option<opt::name, opt::description, std::vector<typename opt::type>, opt::is_required> {
     using base_type = typename opt::type;
+    using type = std::vector<typename opt::type>;
     static_assert(!std::is_same_v<base_type, bool>, "Type of multiple<> cannot be bool");
     static_assert(!std::is_same_v<base_type, void (*)(void*)>, "Type of multiple<> cannot be void(*)(void*)");
 
@@ -228,7 +229,10 @@ struct clopts {
             if constexpr (std::is_same_v<value_type, bool>) return options.at(k).found;
             else if constexpr (std::is_same_v<value_type, callback> || std::is_same_v<value_type, std::vector<callback>>)
                 RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
-            else return std::get<value_type>(options.at(k).value);
+            else {
+                if (!options.at(k).found) error_handler("Cannot call get<>(\"" + k + "\") on an option that hasn't been set.");
+                return std::get<value_type>(options.at(k).value);
+            }
         }
 
         template <typename tstring, tstring key>
