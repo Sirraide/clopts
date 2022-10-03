@@ -9,9 +9,7 @@ static void print_42_and_exit(void* arg) {
 }
 
 /// TODO:
-///  - multiple<option<"--filename", "The name of the file", std::string, true>> => std::vector<std::string>
 ///  - alias<"-f", "--filename">
-///  - include a description of positional arguments in the help message
 
 using options = clopts< // clang-format off
     positional<"file", "The name of the file", file_data, true>,
