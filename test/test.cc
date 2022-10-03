@@ -17,16 +17,17 @@ using options = clopts< // clang-format off
     positional<"file", "The name of the file", file_data, true>,
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
-    multiple<option<"--int", "The name of the file", std::string, true>>,
+    multiple<option<"--int", "Integers", int64_t, true>>,
     flag<"--frobnicate", "Whether to frobnicate">,
     func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
     help
 >; // clang-format on
 
 int main(int argc, char** argv) {
-    auto opts = options::parse(argc, argv);
-    if (opts.has<"--int">()) {
-        auto ints = opts.get<"--int">();
-        for (const auto& i : ints) std::cout << i << std::endl;
+    options::parse(argc, argv);
+    if (auto *ints = options::get<"--int">()) {
+        for (const auto& i : *ints) std::cout << i << "\n";
+    } else {
+        std::cout << "No ints!\n";
     }
 }

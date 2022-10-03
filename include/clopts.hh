@@ -141,6 +141,8 @@ struct multiple : public option<opt::name, opt::description, std::vector<typenam
 
 template <typename... opts>
 struct clopts {
+    constexpr clopts() = delete;
+
     /// Make sure no two options have the same name.
     static constexpr bool check_duplicate_options() { // clang-format off
         bool ok = true;
@@ -193,83 +195,81 @@ struct clopts {
     template <typename t>
     using value_type_t = std::conditional_t<std::is_same_v<t, file_data>, std::string, std::conditional_t<std::is_same_v<t, std::vector<file_data>>, std::vector<std::string>, t>>;
 
-    struct parsed_options {
-        struct option_data {
-            std::variant<std::string, int64_t, double, std::vector<std::string>, std::vector<int64_t>, std::vector<double>> value;
-            bool found = false;
-        };
-        std::map<std::string, option_data> options;
-
-        parsed_options() { ((options[std::string{opts::name.sv()}] = {}), ...); }
-
-        template <typename tstring, tstring key>
-        static constexpr void assert_has_key() {
-            static_assert(((opts::name.len == key.size() && __builtin_strcmp(opts::name.data, key.c_str()) == 0) || ...),
-                "Invalid option name. You've probably misspelt an option.");
-        }
-
-        template <typename tstring, tstring key>
-        [[nodiscard]] static auto as_std_string() -> std::string {
-            if constexpr (std::is_same_v<std::remove_cvref_t<tstring>, std::string>) return key;
-            else return std::string{key.c_str(), key.size()};
-        }
-
-        template <typename tstring, tstring key>
-        [[nodiscard]] auto get_value() -> option_data& {
-            static const std::string k = as_std_string<tstring, key>();
-            assert_has_key<tstring, key>();
-            return options[k];
-        }
-
-        template <static_string s>
-        [[nodiscard]] auto get() -> value_type_t<type_of_t<s>>& {
-            using value_type = value_type_t<type_of_t<s>>;
-            static const std::string k = as_std_string<decltype(s), s>();
-            assert_has_key<decltype(s), s>();
-            if constexpr (std::is_same_v<value_type, bool>) return options.at(k).found;
-            else if constexpr (std::is_same_v<value_type, callback> || std::is_same_v<value_type, std::vector<callback>>)
-                RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
-            else {
-                if (!options.at(k).found) error_handler("Cannot call get<>(\"" + k + "\") on an option that hasn't been set.");
-                return std::get<value_type>(options.at(k).value);
-            }
-        }
-
-        template <typename tstring, tstring key>
-        [[nodiscard]] bool has_value() const {
-            static const std::string k = as_std_string<tstring, key>();
-            assert_has_key<tstring, key>();
-            return options.at(k).found;
-        }
-
-        template <static_string s>
-        [[nodiscard]] auto has() const -> bool {
-            static const std::string k = as_std_string<decltype(s), s>();
-            assert_has_key<decltype(s), s>();
-            return options.at(k).found;
-        }
-
-        template <typename type, static_string opt_name>
-        void dump_option(std::ostream& s) const {
-            static const std::string k = as_std_string<decltype(opt_name), opt_name>();
-            assert_has_key<decltype(opt_name), opt_name>();
-            if constexpr (std::is_same_v<type, bool>) s << k << ":" << std::boolalpha << options.at(k).found << "\n";
-            if constexpr (std::is_same_v<type, callback>) s << k << "\n";
-            else s << k << ":" << std::get<value_type_t<type>>(options.at(k).value) << "\n";
-        }
-
-        std::ostream& dump(std::ostream& s) const {
-            (dump_option<typename opts::type, opts::name>(s), ...);
-            return s;
-        }
-    };
-
     static inline bool has_error;
     static inline int argc;
     static inline int argi;
     static inline char** argv;
+    static inline std::tuple<value_type_t<typename opts::type>...> optvals;
+    static inline std::array<bool, sizeof...(opts)> opts_found{};
+    static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.data...};
+    static inline bool opts_parsed{};
 
-    constexpr clopts() = delete;
+    template <typename tstring, tstring key>
+    static constexpr void assert_has_key() {
+        static_assert(((opts::name.len == key.size() && __builtin_strcmp(opts::name.data, key.c_str()) == 0) || ...),
+            "Invalid option name. You've probably misspelt an option.");
+    }
+
+    template <size_t index, static_string option>
+    static constexpr size_t optindex_impl() {
+        if constexpr (index >= sizeof...(opts)) RAISE_COMPILE_ERROR("Option index out of bounds");
+        else if constexpr (__builtin_strcmp(opt_names[index], option.data) == 0) return index;
+        else return optindex_impl<index + 1, option>();
+    }
+
+    template <static_string option>
+    static constexpr size_t optindex() {
+        constexpr size_t sz = optindex_impl<0, option>();
+        static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
+        return sz;
+    }
+
+    template <static_string option>
+    static constexpr bool found() {
+        return opts_found[optindex<option>()];
+    }
+
+    template <static_string option>
+    static constexpr void set_found() {
+        opts_found[optindex<option>()] = true;
+    }
+
+    template <static_string s>
+    [[nodiscard]] static constexpr auto ref() -> decltype(std::get<optindex<s>()>(optvals))& {
+        using value_type = decltype(std::get<optindex<s>()>(optvals));
+        if constexpr (std::is_same_v<value_type, bool>) RAISE_COMPILE_ERROR("Cannot call ref() on an option<bool>");
+        else if constexpr (std::is_same_v<value_type, callback> || std::is_same_v<value_type, std::vector<callback>>)
+            RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
+        else {
+            return std::get<optindex<s>()>(optvals);
+        }
+    }
+
+    template <static_string s>
+    static constexpr auto get() -> std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>* {
+        using value_type = decltype(std::get<optindex<s>()>(optvals));
+        if constexpr (std::is_same_v<value_type, bool>) return opts_found.data() + optindex<s>();
+        else if constexpr (std::is_same_v<value_type, callback> || std::is_same_v<value_type, std::vector<callback>>)
+            RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
+        else {
+            if (!opts_found[optindex<s>()]) return nullptr;
+            return std::addressof(std::get<optindex<s>()>(optvals));
+        }
+    }
+    /*
+            template <typename type, static_string opt_name>
+            void dump_option(std::ostream& s) const {
+                static const std::string k = as_std_string<decltype(opt_name), opt_name>();
+                assert_has_key<decltype(opt_name), opt_name>();
+                if constexpr (std::is_same_v<type, bool>) s << k << ":" << std::boolalpha << options.at(k).found << "\n";
+                if constexpr (std::is_same_v<type, callback>) s << k << "\n";
+                else s << k << ":" << std::get<value_type_t<type>>(options.at(k).value) << "\n";
+            }
+
+            std::ostream& dump(std::ostream& s) const {
+                (dump_option<typename opts::type, opts::name>(s), ...);
+                return s;
+            }*/
 
     static constexpr auto make_help_message() -> help_string_t {
         help_string_t msg{};
@@ -362,16 +362,6 @@ struct clopts {
         return buffer;
     }
 
-    template <static_string s>
-    [[nodiscard]] static auto get(parsed_options& o) -> typename parsed_options::option_data& {
-        return o.template get_value<decltype(s), s>();
-    }
-
-    template <auto key>
-    [[nodiscard]] static bool has(parsed_options& o) {
-        return o.template has_value<decltype(key), key>();
-    }
-
 #define ERR                                        \
     do {                                           \
         std::string msg = "Could not map file \""; \
@@ -435,7 +425,7 @@ struct clopts {
     }
 
     template <typename option, static_string opt_name>
-    static bool handle_option(parsed_options& options, std::string opt_str) {
+    static bool handle_option(std::string opt_str) {
         /// This function only handles named options.
         if constexpr (
             requires { option::is_positional; } || requires { option::base_type::is_positional; }) return false;
@@ -447,7 +437,7 @@ struct clopts {
             static constexpr bool is_multiple = requires { option::is_multiple; };
             if constexpr (!is_multiple) {
                 auto check_duplicate = [&] {
-                    if (has<opt_name>(options)) {
+                    if (found<opt_name>()) {
                         std::string errmsg;
                         errmsg += "Duplicate option: \"";
                         errmsg += opt_str;
@@ -466,14 +456,14 @@ struct clopts {
             /// Flags don't have arguments.
             if constexpr (std::is_same_v<base_type, bool>) {
                 if (opt_str != opt_name.sv()) return false;
-                get<opt_name>(options).found = true;
+                set_found<opt_name>();
                 return true;
             }
 
             /// If this is a function argument, simply call the callback and we're done
             else if constexpr (std::is_same_v<base_type, callback>) {
                 if (opt_str != opt_name.sv()) return false;
-                get<opt_name>(options).found = true;
+                set_found<opt_name>();
                 if constexpr (requires { option::is_help_option; }) {
                     std::string h = help();
                     option::callback((void*) &h);
@@ -492,11 +482,12 @@ struct clopts {
                     if (opt_str[opt_name.size()] != '=') return false;
                     auto opt_start_offs = opt_name.size() + 1;
                     if constexpr (is_multiple) {
-                        if (!get<opt_name>(options).found) get<opt_name>(options).value = value_type_t<typename option::type>{};
-                        std::get<value_type_t<typename option::type>>(get<opt_name>(options).value)
-                            .push_back(make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs));
-                    } else get<opt_name>(options).value = make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
-                    get<opt_name>(options).found = true;
+                        //if (!found<opt_name>()) ref<opt_name>() = value_type_t<typename option::type>{};
+                        ref<opt_name>().push_back(make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs));
+                    } else {
+                        ref<opt_name>() = make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
+                    }
+                    set_found<opt_name>();
                     return true;
                 }
 
@@ -506,18 +497,19 @@ struct clopts {
                     return false;
                 }
                 if constexpr (is_multiple) {
-                    if (!get<opt_name>(options).found) get<opt_name>(options).value = value_type_t<typename option::type>{};
-                    std::get<value_type_t<typename option::type>>(get<opt_name>(options).value)
-                        .push_back(make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi])));
-                } else get<opt_name>(options).value = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
-                get<opt_name>(options).found = true;
+                    //if (!get<opt_name>(options).found) get<opt_name>(options).value = value_type_t<typename option::type>{};
+                    ref<opt_name>().push_back(make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi])));
+                } else {
+                    ref<opt_name>() = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
+                }
+                set_found<opt_name>();
                 return true;
             }
         }
     }
 
     template <typename opt>
-    static bool handle_positional(parsed_options& options, std::string opt_str) {
+    static bool handle_positional(std::string opt_str) {
         /// This function only cares about positional options.
         if constexpr (
             !requires { opt::is_positional; } && !requires { opt::base_type::is_positional; }) return false;
@@ -525,20 +517,20 @@ struct clopts {
             /// If we've already encountered this positional option, then return.
             static constexpr bool is_multiple = requires { opt::is_multiple; };
             if constexpr (!is_multiple) {
-                if (has<opt::name>(options)) return false;
+                if (found<opt::name>()) return false;
             }
 
             /// Otherwise, attempt to parse this as the option value.
-            get<opt::name>(options).found = true;
-            if constexpr (is_multiple) get<opt::name>(options).value.push_back(make_arg<typename opt::type>(opt_str.data(), opt_str.size()));
-            else get<opt::name>(options).value = make_arg<typename opt::type>(opt_str.data(), opt_str.size());
+            set_found<opt::name>();
+            if constexpr (is_multiple) ref<opt::name>().push_back(make_arg<typename opt::type>(opt_str.data(), opt_str.size()));
+            else ref<opt::name>() = make_arg<typename opt::type>(opt_str.data(), opt_str.size());
             return true;
         }
     }
 
     template <typename type, static_string opt_name, bool required>
-    static bool validate_option(parsed_options& options) {
-        if (!get<opt_name>(options).found && required) {
+    static bool validate_option() {
+        if (!found<opt_name>() && required) {
             std::string errmsg;
             errmsg += "Option \"";
             errmsg += opt_name.sv();
@@ -549,18 +541,17 @@ struct clopts {
         return true;
     }
 
-    static auto parse(int _argc, char** _argv) -> parsed_options {
-        parsed_options options;
+    static void parse(int _argc, char** _argv) {
         has_error = false;
         argc = _argc;
         argv = _argv;
 
         for (argi = 1; argi < argc; argi++) {
-            if (has_error) return {};
+            if (has_error) return;
             const std::string opt_str{argv[argi], __builtin_strlen(argv[argi])};
 
-            if (!(handle_option<opts, opts::name>(options, opt_str) || ...)) {
-                if (!(handle_positional<opts>(options, opt_str) || ...)) {
+            if (!(handle_option<opts, opts::name>(opt_str) || ...)) {
+                if (!(handle_positional<opts>(opt_str) || ...)) {
                     std::string errmsg;
                     errmsg += "Unrecognized option: \"";
                     errmsg += opt_str;
@@ -570,8 +561,7 @@ struct clopts {
             }
         }
 
-        if (!(validate_option<typename opts::type, opts::name, opts::is_required>(options) || ...)) return {};
-        return options;
+        (validate_option<typename opts::type, opts::name, opts::is_required>() || ...);
     }
 };
 

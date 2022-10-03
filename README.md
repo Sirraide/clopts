@@ -26,18 +26,23 @@ static void print_42_and_exit(void* arg) {
     std::exit(0);
 }
 
-using options = clopts<
+using options = clopts< // clang-format off
     positional<"file", "The name of the file", file_data, true>,
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
+    multiple<option<"--int", "Integers", int64_t, true>>,
     flag<"--frobnicate", "Whether to frobnicate">,
     func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
     help
->;
+>; // clang-format on
 
 int main(int argc, char** argv) {
-    auto opts = options::parse(argc, argv);
-    std::cout << opts.get<"file">();
+    options::parse(argc, argv);
+    if (auto *ints = options::get<"--int">()) {
+        for (const auto& i : *ints) std::cout << i << "\n";
+    } else {
+        std::cout << "No ints!\n";
+    }
 }
 ```
 
@@ -58,51 +63,29 @@ clopts<
 > options;
 ```
 
-Almost all the types defined by this library are *not* meant to be
-instantiated. The only exception is `clopts::parsed_options`, which
-you probably won't instantiate yourself. 
+The types defined by this library are *not* meant to be instantiated.
 
 At runtime, the options are parsed by calling the `parse()` function of
-your `clopts` type, passing it `argc` and `argv`. This function returns
-a `parsed_options` struct that contains the values of the parsed options.
+your `clopts` type, passing it `argc` and `argv`.
 ```c++
-auto opts = options::parse(argc, argv);
+options::parse(argc, argv);
 ```
 
 For a detailed description of all the option types, see the `Option Types`
 section below.
 
 ### Accessing Option Values
-Before attempting to get the value of an option, you *must* first check 
-whether it's present or not. This can be done using the `has<>()` function 
-template:
+The `get<>()` function returns a pointer to an option value, or nullptr if
+the option is not found:
 ```c++
-auto opts = options::parse(argc, argv);
-if (opts.has<"--size">()) {
+options::parse(argc, argv);
+if (auto* size = options::get<"--size">()) {
     /// do something
 }
 ```
 
-Trying to call `opts.get<"--size">()` if `opts.has<"--size">()` returns
-`false` may, but need not, throw a `std::bad_variant_access` exception.
-
-Note that `opts.has<"--size">()` checks whether the `--size` option was 
-encountered by the parser, i.e. whether the user specified it on the command
-line. If instead no option with the name `--size` exists, you'll get a 
-compile-time error instead.
-
-You can then get the value of an option by passing the name of the option to
-the `get<>` function template and calling it.
-```c++
-std::cout << opts.get<"foobar">();
-```
-**W A R N I N G:** The `get<>()` template is marked as `[[nodiscard]]`. *Make
-sure not to ignore that!* At the time of writing, gcc versions before 11.3
-have a [bug](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=105143) that causes an internal compiler error when trying to emit a
-`[[nodiscard]]` warning for `get<>()` if you don't use its return value.
-
-Make sure to always use it or at least cast it to `(void)` if, for some reason,
-you want to access, but not use it.
+Note that if no option with the name `--size` exists, you'll get a 
+compile-time error.
 
 ### Error Handling
 This section only concerns errors that occur when parsing the options;
@@ -132,6 +115,9 @@ address the most common use cases. You can also define your own [custom option
 types](#custom-option-types) by deriving from `option`, but more on that later.
 
 Depending on the [type](#type), some options take arguments, others don't.
+
+NOTE: Not all option types are currently documented. See the example above for
+additional option types that may not be documented below.
 
 Different types of options can be added by passing them to the `clopts` type
 as template parameters.
