@@ -373,14 +373,20 @@ protected:
         else if constexpr (std::is_same_v<base_type, file_data>) return map_file(s);
         else if constexpr (std::is_same_v<base_type, int64_t>) {
             try {
-                return std::stol(s);
+                size_t pos{};
+                auto i = std::stol(s, &pos);
+                if (pos != s.size()) throw 1;
+                return i;
             } catch (...) {
                 handle_error(s + " does not appear to be a valid integer");
                 return {};
             }
         } else if constexpr (std::is_same_v<base_type, double>) {
             try {
-                return std::stod(s);
+                size_t pos{};
+                auto d = std::stod(s, &pos);
+                if (pos != s.size()) throw 1;
+                return d;
             } catch (...) {
                 handle_error(s + " does not appear to be a valid floating-point number");
                 return {};
