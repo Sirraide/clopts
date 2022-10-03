@@ -149,7 +149,6 @@ protected:
     clopts& operator=(const clopts& o) = delete;
     clopts& operator=(clopts&& o) = delete;
 
-
     /// Make sure no two options have the same name.
     static constexpr bool check_duplicate_options() { // clang-format off
         bool ok = true;
@@ -177,28 +176,6 @@ protected:
     using integer = int64_t;
     using callback = void (*)(void*);
 
-    template <static_string s, typename... options>
-    struct type_of;
-
-    template <static_string s, typename option>
-    struct type_of<s, option> {
-        using type = typename option::type;
-    };
-
-    template <static_string s, typename option, typename option2>
-    struct type_of<s, option, option2> {
-        using type = std::conditional_t<s == option::name, typename option::type, typename option2::type>;
-    };
-
-    template <static_string s, typename option, typename... options>
-    struct type_of<s, option, options...> {
-        using type = std::conditional_t<sizeof...(options) == 0 || s == option::name, typename option::type,
-            typename type_of<s, options...>::type>;
-    };
-
-    template <static_string s>
-    using type_of_t = typename type_of<s, opts...>::type;
-
     template <typename t>
     using value_type_t = std::conditional_t<std::is_same_v<t, file_data>, std::string, std::conditional_t<std::is_same_v<t, std::vector<file_data>>, std::vector<std::string>, t>>;
 
@@ -210,12 +187,6 @@ protected:
     static inline std::array<bool, sizeof...(opts)> opts_found{};
     static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.data...};
     static inline bool opts_parsed{};
-
-    template <typename tstring, tstring key>
-    static constexpr void assert_has_key() {
-        static_assert(((opts::name.len == key.size() && __builtin_strcmp(opts::name.data, key.c_str()) == 0) || ...),
-            "Invalid option name. You've probably misspelt an option.");
-    }
 
     template <size_t index, static_string option>
     static constexpr size_t optindex_impl() {
@@ -477,7 +448,6 @@ protected:
                     if (opt_str[opt_name.size()] != '=') return false;
                     auto opt_start_offs = opt_name.size() + 1;
                     if constexpr (is_multiple) {
-                        //if (!found<opt_name>()) ref<opt_name>() = value_type_t<typename option::type>{};
                         ref<opt_name>().push_back(make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs));
                     } else {
                         ref<opt_name>() = make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs);
@@ -492,7 +462,6 @@ protected:
                     return false;
                 }
                 if constexpr (is_multiple) {
-                    //if (!get<opt_name>(options).found) get<opt_name>(options).value = value_type_t<typename option::type>{};
                     ref<opt_name>().push_back(make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi])));
                 } else {
                     ref<opt_name>() = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
@@ -541,6 +510,13 @@ public:
         has_error = false;
         argc = _argc;
         argv = _argv;
+
+        if (opts_parsed) {
+            handle_error("Cannot parse options twice");
+            return;
+        } else {
+            opts_parsed = true;
+        }
 
         for (argi = 1; argi < argc; argi++) {
             if (has_error) return;
