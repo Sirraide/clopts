@@ -190,7 +190,7 @@ protected:
 
     template <size_t index, static_string option>
     static constexpr size_t optindex_impl() {
-        if constexpr (index >= sizeof...(opts)) RAISE_COMPILE_ERROR("Option index out of bounds");
+        if constexpr (index >= sizeof...(opts)) return index;
         else if constexpr (__builtin_strcmp(opt_names[index], option.data) == 0) return index;
         else return optindex_impl<index + 1, option>();
     }
@@ -223,9 +223,8 @@ protected:
         }
     }
 
-public:
     template <static_string s>
-    static constexpr auto get() -> std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>* {
+    static constexpr auto get_impl() -> std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>* {
         using value_type = decltype(std::get<optindex<s>()>(optvals));
         if constexpr (std::is_same_v<value_type, bool>) return opts_found.data() + optindex<s>();
         else if constexpr (std::is_same_v<value_type, callback> || std::is_same_v<value_type, std::vector<callback>>)
@@ -236,7 +235,15 @@ public:
         }
     }
 
-protected:
+public:
+    template <static_string s>
+    static constexpr auto get() {
+        constexpr auto sz = optindex_impl<0, s>();
+        if constexpr (sz < sizeof...(opts)) return get_impl<s>();
+        else static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
+    }
+
+    protected:
     static constexpr auto make_help_message() -> help_string_t {
         help_string_t msg{};
 
