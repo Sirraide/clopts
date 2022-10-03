@@ -141,7 +141,14 @@ struct multiple : public option<opt::name, opt::description, std::vector<typenam
 
 template <typename... opts>
 struct clopts {
+protected:
     constexpr clopts() = delete;
+    constexpr ~clopts() = delete;
+    clopts(const clopts& o) = delete;
+    clopts(clopts&& o) = delete;
+    clopts& operator=(const clopts& o) = delete;
+    clopts& operator=(clopts&& o) = delete;
+
 
     /// Make sure no two options have the same name.
     static constexpr bool check_duplicate_options() { // clang-format off
@@ -245,6 +252,7 @@ struct clopts {
         }
     }
 
+public:
     template <static_string s>
     static constexpr auto get() -> std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>* {
         using value_type = decltype(std::get<optindex<s>()>(optvals));
@@ -256,21 +264,8 @@ struct clopts {
             return std::addressof(std::get<optindex<s>()>(optvals));
         }
     }
-    /*
-            template <typename type, static_string opt_name>
-            void dump_option(std::ostream& s) const {
-                static const std::string k = as_std_string<decltype(opt_name), opt_name>();
-                assert_has_key<decltype(opt_name), opt_name>();
-                if constexpr (std::is_same_v<type, bool>) s << k << ":" << std::boolalpha << options.at(k).found << "\n";
-                if constexpr (std::is_same_v<type, callback>) s << k << "\n";
-                else s << k << ":" << std::get<value_type_t<type>>(options.at(k).value) << "\n";
-            }
 
-            std::ostream& dump(std::ostream& s) const {
-                (dump_option<typename opts::type, opts::name>(s), ...);
-                return s;
-            }*/
-
+protected:
     static constexpr auto make_help_message() -> help_string_t {
         help_string_t msg{};
 
@@ -541,6 +536,7 @@ struct clopts {
         return true;
     }
 
+public:
     static void parse(int _argc, char** _argv) {
         has_error = false;
         argc = _argc;
