@@ -12,9 +12,11 @@
 #include <unistd.h>
 #include <variant>
 
+#ifndef RAISE_COMPILE_ERROR
 #define RAISE_COMPILE_ERROR(msg)                  \
     []<bool x = false> { static_assert(x, msg); } \
     ()
+#endif
 
 namespace command_line_options {
 
