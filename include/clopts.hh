@@ -555,5 +555,5 @@ public:
 } // namespace command_line_options
 
 #undef RAISE_COMPILE_ERROR
-
+#undef ERR
 #endif // CLOPTS_H
