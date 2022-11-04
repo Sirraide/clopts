@@ -548,7 +548,7 @@ public:
             }
         }
 
-        (validate_option<typename opts::type, opts::name, opts::is_required>() || ...);
+        (validate_option<typename opts::type, opts::name, opts::is_required>() && ...);
     }
 };
 
