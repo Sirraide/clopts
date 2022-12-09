@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <variant>
+#include <filesystem>
 
 #ifndef RAISE_COMPILE_ERROR
 #define RAISE_COMPILE_ERROR(msg)                  \
@@ -20,8 +21,11 @@
 
 namespace command_line_options {
 
-/// Dummy type for file options.
-struct file_data {};
+/// A file.
+struct file_data {
+    std::filesystem::path path;
+    std::string contents;
+};
 
 template <size_t sz>
 struct static_string {
@@ -178,14 +182,11 @@ protected:
     using integer = int64_t;
     using callback = void (*)(void*);
 
-    template <typename t>
-    using value_type_t = std::conditional_t<std::is_same_v<t, file_data>, std::string, std::conditional_t<std::is_same_v<t, std::vector<file_data>>, std::vector<std::string>, t>>;
-
     static inline bool has_error;
     static inline int argc;
     static inline int argi;
     static inline char** argv;
-    static inline std::tuple<value_type_t<typename opts::type>...> optvals;
+    static inline std::tuple<typename opts::type...> optvals;
     static inline std::array<bool, sizeof...(opts)> opts_found{};
     static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.data...};
     static inline bool opts_parsed{};
@@ -347,7 +348,7 @@ public:
         return {};                                 \
     } while (0)
 
-    static std::string map_file(std::string_view path) {
+    static file_data map_file(std::string_view path) {
         int fd = ::open(path.data(), O_RDONLY);
         if (fd < 0) [[unlikely]]
             ERR;
@@ -370,11 +371,14 @@ public:
         if (::munmap(mem, sz)) [[unlikely]]
             ERR;
 
-        return ret;
+        file_data dat;
+        dat.path = path;
+        dat.contents = std::move(ret);
+        return dat;
     }
 
     template <typename type>
-    static base_type_t<value_type_t<type>> make_arg(const char* start, size_t len) {
+    static base_type_t<type> make_arg(const char* start, size_t len) {
         using base_type = base_type_t<type>;
 
         std::string s{start, len};
