@@ -399,26 +399,17 @@ public:
         if constexpr (std::is_same_v<base_type, std::string>) return s;
         else if constexpr (std::is_same_v<base_type, file_data>) return map_file(s);
         else if constexpr (std::is_same_v<base_type, int64_t>) {
-            try {
-                size_t pos{};
-                auto i = std::stol(s, &pos);
-                if (pos != s.size()) throw 1;
-                return i;
-            } catch (...) {
-                handle_error(s + " does not appear to be a valid integer");
-                return {};
-            }
+            char *pos{};
+            errno = 0;
+            auto i = std::strtoll(s.data(), &pos, 10);
+            if (errno == ERANGE) handle_error(s + " does not appear to be a valid integer");
+            return int64_t(i);
         } else if constexpr (std::is_same_v<base_type, double>) {
-            try {
-                size_t pos{};
-                auto d = std::stod(s, &pos);
-                if (pos != s.size()) throw 1;
-                return d;
-            } catch (...) {
-                handle_error(s + " does not appear to be a valid floating-point number");
-                return {};
-            }
-
+            char *pos{};
+            errno = 0;
+            auto i = std::strtod(s.data(), &pos);
+            if (errno == ERANGE) handle_error(s + " does not appear to be a valid integer");
+            return double(i);
         } else if constexpr (std::is_same_v<base_type, callback>) RAISE_COMPILE_ERROR("Cannot make function arg.");
         else RAISE_COMPILE_ERROR("Option argument must be std::string, integer, double, or void(*)()");
     }
