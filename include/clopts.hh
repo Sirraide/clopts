@@ -87,6 +87,19 @@ struct base_type_type {
 template <typename t>
 using base_type_t = typename base_type_type<t>::type;
 
+/// Check if an option is a positional option.
+template <typename opt>
+struct is_positional {
+    enum { value = requires { {typename opt::is_positional_{} } -> std::same_as<std::true_type>; } };
+    using type = std::bool_constant<value>;
+};
+
+template <typename opt>
+using positional_t = typename is_positional<opt>::type;
+
+template <typename opt>
+inline constexpr bool is_positional_v = is_positional<opt>::value;
+
 template <static_string _name, static_string _description = "", typename _type = std::string, bool required = false>
 struct option {
     static_assert(sizeof _description.data < 512, "Description may not be longer than 512 characters");
@@ -113,7 +126,7 @@ struct option {
 
 template <static_string _name, static_string _description, typename _type = std::string, bool required = true>
 struct positional : option<_name, _description, _type, required> {
-    static constexpr inline bool is_positional = true;
+    using is_positional_ = std::true_type;
 };
 
 template <static_string _name, static_string _description, void (*f)(void*), void* arg = nullptr, bool required = false>
@@ -143,6 +156,7 @@ struct multiple : public option<opt::name, opt::description, std::vector<typenam
 
     constexpr multiple() = delete;
     static constexpr inline bool is_multiple = true;
+    using is_positional_ = positional_t<opt>;
 };
 
 template <typename... opts>
@@ -171,7 +185,7 @@ protected:
     } // clang-format on
 
     static constexpr size_t validate_multiple() { // clang-format off
-        return (... + (requires { opts::is_multiple; } && requires { opts::base_type::is_positional; } ? 1 : 0));
+        return (... + (requires { opts::is_multiple; } && is_positional_v<opts> ? 1 : 0));
     } // clang-format on
 
     static_assert(check_duplicate_options(), "Two different options may not have the same name");
@@ -253,7 +267,7 @@ public:
         /// Determine the length of the longest name + typename.
         size_t max_len{};
         auto determine_max_len = [&]<typename opt> {
-            if constexpr (requires { opt::is_positional; }) return;
+            if constexpr (is_positional_v<opt>) return;
             size_t combined_len = opt::name.len;
             if constexpr (!opt::is_flag && !std::is_same_v<typename opt::type, callback>) combined_len += (type_name<typename opt::type>().len + 3);
             if (combined_len > max_len) max_len = combined_len;
@@ -263,7 +277,7 @@ public:
         /// Append the positional options.
         msg.append(" ");
         auto append_positional_options = [&]<typename opt> {
-            if constexpr (!requires { opt::is_positional; }) return;
+            if constexpr (not is_positional_v<opt>) return;
             msg.append("<");
             msg.append(opt::name.data, opt::name.len);
             msg.append("> ");
@@ -275,7 +289,7 @@ public:
         msg.append("Options:\n");
         auto append_option = [&]<typename opt> {
             /// If this is a positional option, we don't want to append it here.
-            if constexpr (requires { opt::is_positional; }) return;
+            if constexpr (is_positional_v<opt>) return;
 
             /// Compute the padding for this option.
             const auto tname = type_name<typename opt::type>();
@@ -412,8 +426,7 @@ public:
     template <typename option, static_string opt_name>
     static bool handle_option(std::string opt_str) {
         /// This function only handles named options.
-        if constexpr (
-            requires { option::is_positional; } || requires { option::base_type::is_positional; }) return false;
+        if constexpr (is_positional_v<option>) return false;
         else {
             auto sv = opt_name.sv();
             /// If the supplied string doesn't start with the option name, move on to the next option
@@ -494,8 +507,7 @@ public:
     template <typename opt>
     static bool handle_positional(std::string opt_str) {
         /// This function only cares about positional options.
-        if constexpr (
-            !requires { opt::is_positional; } && !requires { opt::base_type::is_positional; }) return false;
+        if constexpr (not is_positional_v<opt>) return false;
         else {
             /// If we've already encountered this positional option, then return.
             static constexpr bool is_multiple = requires { opt::is_multiple; };
