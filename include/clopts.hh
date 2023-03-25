@@ -241,9 +241,12 @@ protected:
     }
 
     template <static_string s>
-    static constexpr auto get_impl() -> std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>* {
-        using value_type = decltype(std::get<optindex<s>()>(optvals));
-        if constexpr (std::is_same_v<value_type, bool>) return opts_found.data() + optindex<s>();
+    using optval_t = std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>;
+
+    template <static_string s>
+    static constexpr auto get_impl() -> std::conditional_t<std::is_same_v<optval_t<s>, bool>, bool, optval_t<s>*> {
+        using value_type = optval_t<s>;
+        if constexpr (std::is_same_v<value_type, bool>) return opts_found[optindex<s>()];
         else if constexpr (std::is_same_v<value_type, callback> || std::is_same_v<value_type, std::vector<callback>>)
             RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
         else {
@@ -253,6 +256,11 @@ protected:
     }
 
 public:
+    /// Get the value of an option.
+    ///
+    /// \return true/false if the option is a flag
+    /// \return nullptr if the option was not found
+    /// \return a pointer to the value if the option was found
     template <static_string s>
     static constexpr auto get() {
         constexpr auto sz = optindex_impl<0, s>();
