@@ -12,7 +12,7 @@ static void print_42_and_exit(void* arg) {
 ///  - alias<"-f", "--filename">
 
 using options = clopts< // clang-format off
-    positional<"file", "The name of the file", file_data, true>,
+    positional<"file", "The name of the file", file<std::vector<std::byte>>, true>,
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
     multiple<option<"--int", "Integers", int64_t, true>>,

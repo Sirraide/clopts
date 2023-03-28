@@ -399,7 +399,13 @@ public:
         if (::close(fd)) [[unlikely]]
             ERR;
 
-        typename file_data_type::contents_type ret{reinterpret_cast<typename file_data_type::element_pointer>(mem), sz};
+        /// Construct the file contents.
+        typename file_data_type::contents_type ret;
+        auto pointer = reinterpret_cast<typename file_data_type::element_pointer>(mem);
+        if constexpr (requires { ret.assign(pointer, sz); }) ret.assign(pointer, sz);
+        else if constexpr (requires { ret.assign(pointer, pointer + sz); }) ret.assign(pointer, pointer + sz);
+        else RAISE_COMPILE_ERROR("file_data_type::contents_type must have an assign method that takes a pointer and a size_t (or a begin and end iterator) as arguments.");
+
         if (::munmap(mem, sz)) [[unlikely]]
             ERR;
 
