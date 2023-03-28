@@ -22,10 +22,15 @@
 namespace command_line_options {
 
 /// A file.
-struct file_data {
+template <typename contents_type = std::string>
+struct file {
+    static constexpr bool is_file_data = true;
+
     std::filesystem::path path;
-    std::string contents;
+    contents_type contents;
 };
+
+using file_data = file<>;
 
 template <size_t sz>
 struct static_string {
@@ -69,7 +74,8 @@ template <typename t>
 constexpr inline bool is_vector_v = std::is_same_v<t, std::vector<std::string>> //
                                     || std::is_same_v<t, std::vector<double>>   //
                                     || std::is_same_v<t, std::vector<int64_t>>  //
-                                    || std::is_same_v<t, std::vector<file_data>>;
+                                    || std::is_same_v<t, std::vector<file_data>>
+                                    || std::is_same_v<t, std::vector<file<std::vector<char>>>>;
 
 template <typename t>
 struct base_type_type;
@@ -110,7 +116,7 @@ struct option {
                       || std::is_same_v<_type, bool>            //
                       || std::is_same_v<_type, double>          //
                       || std::is_same_v<_type, int64_t>         //
-                      || std::is_same_v<_type, file_data>       //
+                      || requires { _type::is_file_data; }      //
                       || std::is_same_v<_type, void (*)(void*)> //
                       || is_vector_v<_type>,                    //
         "Option type must be std::string, bool, int64_t, double, file_data, or void(*)(), or a vector thereof");
@@ -351,7 +357,7 @@ public:
         else if constexpr (std::is_same_v<t, bool>) buffer.append("bool");
         else if constexpr (std::is_same_v<t, integer>) buffer.append("number");
         else if constexpr (std::is_same_v<t, double>) buffer.append("number");
-        else if constexpr (std::is_same_v<t, file_data>) buffer.append("file");
+        else if constexpr (requires { t::is_file_data; }) buffer.append("file");
         else if constexpr (std::is_same_v<t, callback>) buffer.append("function");
         else if constexpr (is_vector_v<t>) {
             buffer.append(type_name<typename t::value_type>().data, type_name<typename t::value_type>().len);
@@ -370,7 +376,8 @@ public:
         return {};                                 \
     } while (0)
 
-    static file_data map_file(std::string_view path) {
+    template <typename file_data_type>
+    static file_data_type map_file(std::string_view path) {
         int fd = ::open(path.data(), O_RDONLY);
         if (fd < 0) [[unlikely]]
             ERR;
@@ -389,11 +396,11 @@ public:
         if (::close(fd)) [[unlikely]]
             ERR;
 
-        std::string ret{mem, sz};
+        decltype(std::declval<file_data_type>().contents) ret{mem, sz};
         if (::munmap(mem, sz)) [[unlikely]]
             ERR;
 
-        file_data dat;
+        file_data_type dat;
         dat.path = path;
         dat.contents = std::move(ret);
         return dat;
@@ -405,7 +412,7 @@ public:
 
         std::string s{start, len};
         if constexpr (std::is_same_v<base_type, std::string>) return s;
-        else if constexpr (std::is_same_v<base_type, file_data>) return map_file(s);
+        else if constexpr (requires { base_type::is_file_data; }) return map_file<base_type>(s);
         else if constexpr (std::is_same_v<base_type, int64_t>) {
             char *pos{};
             errno = 0;

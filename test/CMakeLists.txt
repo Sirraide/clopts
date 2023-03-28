@@ -8,7 +8,7 @@ add_library(options INTERFACE)
 target_compile_options(options INTERFACE
         -Wall -Wextra -Wundef -Werror=return-type -Wconversion -Wpedantic
         -fdiagnostics-color=always)
-if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(options INTERFACE -O3)
 else ()
     target_compile_options(options INTERFACE -O0 -ggdb)
