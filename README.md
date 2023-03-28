@@ -25,7 +25,7 @@ library:
 using namespace command_line_options;
 
 int x = 42;
-static void print_42_and_exit(void* arg) {
+static void print_42_and_exit(void* arg, std::string_view, std::string_view) {
     int* i = reinterpret_cast<int*>(arg);
     std::cout << *i;
     std::exit(0);
@@ -38,7 +38,7 @@ using options = clopts< // clang-format off
     multiple<option<"--int", "Integers", int64_t, true>>,
     flag<"--frobnicate", "Whether to frobnicate">,
     func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
-    help
+    help<>
 >; // clang-format on
 
 int main(int argc, char** argv) {
@@ -198,13 +198,30 @@ A program that uses these options can be called as follows:
 In the examples above, `*get<"bar">()` is always `"opt1"`, and
 `*get<"baz">()` is always `"opt2"`.
 
-### Option Type: `help`
+### Option Type: `help<>`
 This is a special option type that takes no arguments and no template parameters and adds a `--help`
 option that simply prints a help message containing the names, types, and
-descriptions of all options and then exits the program.
+descriptions of all options and then exits the program. Note: You have to use `help<>`, rather than just `help`.
 
 This message can also be retrieved by calling the static `help()` function
 of the `clopts` type.
+
+You can specify a custom help message handler to override the default behaviour by adding
+it to the `help` type as a template parameter:
+```c++
+static void custom_help(void* msg, std::string_view, std::string_view) {
+    std::cerr << *reinterpret_cast<std::string*>(msg) << "\n";
+    std::cerr << "\nAdditional help information goes here.\n";
+    std::exit(1);
+}
+
+clopts<
+    help<custom_help>
+>;
+```
+
+The complex signature required for such a function is rather unfortunate, but there will be no simple
+of avoiding it until C++ allows `reinterpret_cast` to be used in constant expressions.
 
 ### Meta-Option Type: `multiple<>`
 The `multiple` option type can not be used on its own and instead wraps another option and modifies it such that multiple occurences of that option are allowed:
@@ -223,10 +240,12 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 ### Option Type: `func`
 A `func` defines a callback that is called by the parser when the
 option is encountered. You can specify additional data to be passed
-to the callback in the form of a `void*`.
+to the callback in the form of a `void*`. Furthermore, the parser
+will pass the option name and value (if there is one) to the callback
+as `std::string_view`s.
 ```c++
 int x = 42;
-static void print_42_and_exit(void* arg) {
+static void print_42_and_exit(void* arg, std::string_view, std::string_view) {
     int* i = reinterpret_cast<int*>(arg);
     std::cout << *i;
     std::exit(0);

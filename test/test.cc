@@ -2,7 +2,7 @@
 using namespace command_line_options;
 
 int x = 42;
-static void print_42_and_exit(void* arg) {
+static void print_42_and_exit(void* arg, std::string_view, std::string_view) {
     int* i = reinterpret_cast<int*>(arg);
     std::cout << *i;
     std::exit(0);
@@ -11,7 +11,7 @@ static void print_42_and_exit(void* arg) {
 /// TODO:
 ///  - alias<"-f", "--filename">
 
-static void custom_help(void* msg) {
+static void custom_help(void* msg, std::string_view, std::string_view) {
     std::cerr << *reinterpret_cast<std::string*>(msg) << "\n";
     std::cerr << "\nAdditional help information goes here.\n";
     std::exit(1);
