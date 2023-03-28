@@ -233,7 +233,8 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 
 #### **Properties**
 * If the wrapped option is required, then it is required to be present at least once.
-* `multiple<>` should only ever be used with `flag`s, `option`s, and `func`s.
+* `multiple<>` should only ever be used with `flag`s and `option`s.
+* `multiple<func>` is currently invalid, as `func` options can already occur multiple times.
 * There can only be at most one `multiple<positional<>>` option.
 * `multiple<multiple<>>` is invalid.
 
@@ -243,6 +244,10 @@ option is encountered. You can specify additional data to be passed
 to the callback in the form of a `void*`. Furthermore, the parser
 will pass the option name and value (if there is one) to the callback
 as `std::string_view`s.
+
+A `func` option can occur multiple times.
+
+The following is an example of how to use the `func` option type:
 ```c++
 int x = 42;
 static void print_42_and_exit(void* arg, std::string_view, std::string_view) {

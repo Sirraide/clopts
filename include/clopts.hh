@@ -117,14 +117,14 @@ struct option {
     static_assert(sizeof _name.data < 256, "Option name may not be longer than 256 characters");
     static_assert(!std::is_void_v<_type>, "Option type may not be void. Use bool instead");
     static_assert(
-        std::is_same_v<_type, std::string>            //
-            || std::is_same_v<_type, bool>            //
-            || std::is_same_v<_type, double>          //
-            || std::is_same_v<_type, int64_t>         //
-            || requires { _type::is_file_data; }      //
+        std::is_same_v<_type, std::string>          //
+            || std::is_same_v<_type, bool>          //
+            || std::is_same_v<_type, double>        //
+            || std::is_same_v<_type, int64_t>       //
+            || requires { _type::is_file_data; }    //
             || std::is_same_v<_type, callback_type> //
-            || is_vector_v<_type>,                    //
-        "Option type must be std::string, bool, int64_t, double, file_data, or void(*)(), or a vector thereof");
+            || is_vector_v<_type>,                  //
+        "Option type must be std::string, bool, int64_t, double, file_data, callback, or a vector thereof");
 
     using type = _type;
     static constexpr inline decltype(_name) name = _name;
@@ -164,7 +164,7 @@ struct multiple : public option<opt::name, opt::description, std::vector<typenam
     using base_type = typename opt::type;
     using type = std::vector<typename opt::type>;
     static_assert(!std::is_same_v<base_type, bool>, "Type of multiple<> cannot be bool");
-    static_assert(!std::is_same_v<base_type, callback_type>, "Type of multiple<> cannot be void(*)(void*)");
+    static_assert(!std::is_same_v<base_type, callback_type>, "Type of multiple<> cannot be a callback");
 
     constexpr multiple() = delete;
     static constexpr inline bool is_multiple = true;
@@ -450,7 +450,7 @@ protected:
             if (errno == ERANGE) handle_error(s + " does not appear to be a valid integer");
             return double(i);
         } else if constexpr (std::is_same_v<base_type, callback>) RAISE_COMPILE_ERROR("Cannot make function arg.");
-        else RAISE_COMPILE_ERROR("Option argument must be std::string, integer, double, or void(*)()");
+        else RAISE_COMPILE_ERROR("Option argument must be std::string, integer, double, or callback");
     }
 
     template <typename option, static_string opt_name>
@@ -462,8 +462,9 @@ protected:
             /// If the supplied string doesn't start with the option name, move on to the next option
             if (!opt_str.starts_with(sv)) return false;
 
+            using base_type = base_type_t<typename option::type>;
             static constexpr bool is_multiple = requires { option::is_multiple; };
-            if constexpr (!is_multiple) {
+            if constexpr (not is_multiple and not std::is_same_v<base_type, callback>) {
                 auto check_duplicate = [&] {
                     if (found<opt_name>()) {
                         std::string errmsg;
@@ -479,7 +480,18 @@ protected:
                 if (!check_duplicate()) return false;
             }
 
-            using base_type = base_type_t<typename option::type>;
+            /// Invoke the callback if this is a func<> option.
+#define INVOKE(...)                                           \
+    if constexpr (std::is_same_v<base_type, callback>) {      \
+        if (opt_str != opt_name.sv()) return false;           \
+        set_found<opt_name>();                                \
+        if constexpr (requires { option::is_help_option; }) { \
+            std::string h = help();                           \
+            option::callback((void*) &h, "--help", {});       \
+        }                                                     \
+        option::callback(option::argument, __VA_ARGS__);      \
+        return true;                                          \
+    }
 
             /// Flags don't have arguments.
             if constexpr (std::is_same_v<base_type, bool>) {
@@ -499,16 +511,8 @@ protected:
                     auto opt_start_offs = opt_name.size() + 1;
 
                     /// If this is a function argument, simply call the callback and we're done
-                    if constexpr (std::is_same_v<base_type, callback>) {
-                        if (opt_str != opt_name.sv()) return false;
-                        set_found<opt_name>();
-                        if constexpr (requires { option::is_help_option; }) {
-                            std::string h = help();
-                            option::callback((void*) &h, "--help", {});
-                        }
-                        option::callback(option::argument, opt_name.sv(), {opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs});
-                        return true;
-                    } else {
+                    INVOKE(opt_name.sv(), {opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs})
+                    else {
                         if constexpr (is_multiple) {
                             ref<opt_name>().push_back(make_arg<typename option::type>(opt_str.data() + opt_start_offs, opt_str.size() - opt_start_offs));
                         } else {
@@ -519,36 +523,32 @@ protected:
                     }
                 }
 
-                /// If this is a function argument, simply call the callback and we're done
-                if constexpr (std::is_same_v<base_type, callback>) {
-                    if (opt_str != opt_name.sv()) return false;
-                    set_found<opt_name>();
-                    if constexpr (requires { option::is_help_option; }) {
-                        std::string h = help();
-                        option::callback((void*) &h, "--help", {});
-                    }
-                    option::callback(option::argument, opt_name.sv(), {});
-                    return true;
-                }
-
                 /// Handle the option.
                 else {
                     /// --option value
                     if (++argi == argc) {
-                        handle_error(std::string{"Missing argument for option \""} + opt_str + "\"");
-                        return false;
+                        INVOKE(opt_name.sv(), {})
+                        else {
+                            handle_error(std::string{"Missing argument for option \""} + opt_str + "\"");
+                            return false;
+                        }
                     }
-                    if constexpr (is_multiple) {
-                        ref<opt_name>().push_back(make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi])));
-                    } else {
-                        ref<opt_name>() = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
+                    INVOKE(opt_name.sv(), std::string_view{argv[argi], __builtin_strlen(argv[argi])})
+                    else {
+                        if constexpr (is_multiple) {
+                            ref<opt_name>().push_back(make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi])));
+                        } else {
+                            ref<opt_name>() = make_arg<typename option::type>(argv[argi], __builtin_strlen(argv[argi]));
+                        }
+                        set_found<opt_name>();
+                        return true;
                     }
-                    set_found<opt_name>();
-                    return true;
                 }
             }
         }
     }
+
+#undef INVOKE
 
     template <typename opt>
     static bool handle_positional(std::string opt_str) {
