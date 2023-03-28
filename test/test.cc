@@ -11,6 +11,12 @@ static void print_42_and_exit(void* arg) {
 /// TODO:
 ///  - alias<"-f", "--filename">
 
+static void custom_help(void* msg) {
+    std::cerr << *reinterpret_cast<std::string*>(msg) << "\n";
+    std::cerr << "\nAdditional help information goes here.\n";
+    std::exit(1);
+}
+
 using options = clopts< // clang-format off
     positional<"file", "The name of the file", file<std::vector<std::byte>>, true>,
     positional<"foobar", "Foobar description goes here", std::string, false>,
@@ -18,7 +24,7 @@ using options = clopts< // clang-format off
     multiple<option<"--int", "Integers", int64_t, true>>,
     flag<"--frobnicate", "Whether to frobnicate">,
     func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
-    help
+    help<custom_help>
 >; // clang-format on
 
 int main(int argc, char** argv) {

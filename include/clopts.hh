@@ -66,9 +66,7 @@ struct static_string {
     [[nodiscard]] constexpr auto sv() const -> std::string_view { return {data, len}; }
 };
 
-/// This is a template just so that the compiler merges multiple definitions.
-template <bool = true>
-void print_help_and_exit(void* msg) {
+inline void print_help_and_exit(void* msg) {
     std::cerr << *reinterpret_cast<std::string*>(msg);
     std::exit(0);
 }
@@ -151,7 +149,8 @@ struct flag : public option<_name, _description, bool, required> {
     constexpr flag() = delete;
 };
 
-struct help : public func<"--help", "Print this help information", print_help_and_exit> {
+template <auto callback = print_help_and_exit>
+struct help : public func<"--help", "Print this help information", callback> {
     constexpr help() = delete;
     static constexpr inline bool is_help_option = true;
 };
@@ -347,7 +346,19 @@ public:
     /// \return `true` if the parsing process should continue, and `false` otherwise.
     static inline std::function<bool(std::string&&)> error_handler = [](std::string&& errmsg) -> bool {
         std::cerr << argv[0] << ": " << errmsg << "\n";
-        std::cerr << help();
+
+        /// If there is a help option, invoke it.
+        bool invoked = false;
+        auto invoke_help = [&]<typename opt> {
+            if constexpr (requires { opt::is_help_option; }) {
+                auto h = help();
+                invoked = true;
+                opt::callback((void*)&h);
+            }
+        };
+        (invoke_help.template operator()<opts>(), ...);
+
+        if (not invoked) std::cerr << help();
         std::exit(1);
     };
 
