@@ -22,8 +22,11 @@
 namespace command_line_options {
 
 /// A file.
-template <typename contents_type = std::string>
+template <typename contents_type_t = std::string>
 struct file {
+    using contents_type = contents_type_t;
+    using element_type = typename contents_type::value_type;
+    using element_pointer = std::add_pointer_t<element_type>;
     static constexpr bool is_file_data = true;
 
     std::filesystem::path path;
@@ -396,7 +399,7 @@ public:
         if (::close(fd)) [[unlikely]]
             ERR;
 
-        decltype(std::declval<file_data_type>().contents) ret{mem, sz};
+        typename file_data_type::contents_type ret{reinterpret_cast<typename file_data_type::element_pointer>(mem), sz};
         if (::munmap(mem, sz)) [[unlikely]]
             ERR;
 
