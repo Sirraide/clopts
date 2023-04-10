@@ -337,12 +337,14 @@ protected:
     };
     static constexpr inline help_string_t help_message_raw = make_help_message();
 
+public:
     static auto help() -> std::string {
         std::string msg = "Usage: ";
         msg += argv[0];
         msg.append(help_message_raw.data, help_message_raw.len);
         return msg;
     }
+protected:
 
     /// This callback is called whenever an error occurs during parsing.
     ///
