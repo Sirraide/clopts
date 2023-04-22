@@ -272,6 +272,7 @@ protected:
     static constexpr auto get_impl() -> std::conditional_t<std::is_same_v<optval_t<s>, bool>, bool, optval_t<s>*> {
         using value_type = optval_t<s>;
         if constexpr (std::is_same_v<value_type, bool>) return opts_found[optindex<s>()];
+        else if constexpr (is_vector_v<value_type>) return std::addressof(std::get<optindex<s>()>(optvals));
         else if constexpr (is_callback<value_type> || std::is_same_v<value_type, std::vector<callback_arg_type>> || std::is_same_v<value_type, std::vector<callback_noarg_type>>)
             RAISE_COMPILE_ERROR("Cannot call get<>() on an option with function type.");
         else {
