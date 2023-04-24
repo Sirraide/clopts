@@ -2,16 +2,29 @@
 #define CLOPTS_H
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <functional>
 #include <iostream>
 #include <map>
 #include <string>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <variant>
+
+#ifndef USE_MMAP
+#    ifdef __linux__
+#        define USE_MMAP 1
+#    else
+#        define USE_MMAP 0
+#    endif
+#endif
+
+#if USE_MMAP
+#    include <fcntl.h>
+#    include <sys/mman.h>
+#    include <sys/stat.h>
+#    include <unistd.h>
+#else
+#    include <fstream>
+#endif
 
 #ifndef RAISE_COMPILE_ERROR
 #    define RAISE_COMPILE_ERROR(msg)                  \
@@ -20,6 +33,28 @@
 #endif
 
 namespace command_line_options {
+#if defined __GNUC__ || defined __clang__
+#    define cmd_strlen(str)  __builtin_strlen(str)
+#    define cmd_strcmp(a, b) __builtin_strcmp(a, b)
+
+#else
+constexpr inline std::size_t cmd_strlen(const char* str) {
+    std::size_t len = 0;
+    while (*str++) ++len;
+    return len;
+}
+
+constexpr inline int cmd_strcmp(const char* a, const char* b) {
+    while (*a && *b && *a == *b) {
+        ++a;
+        ++b;
+    }
+    return *a - *b;
+}
+
+#    define cmd_strlen(str)  ::command_line_options::cmd_strlen(str)
+#    define cmd_strcmp(a, b) ::command_line_options::cmd_strcmp(a, b)
+#endif
 
 /// A file.
 template <typename contents_type_t = std::string>
@@ -47,7 +82,7 @@ struct static_string {
     }
 
     template <typename str>
-    [[nodiscard]] constexpr bool operator==(const str& s) const { return len == s.len && __builtin_strcmp(data, s.data) == 0; }
+    [[nodiscard]] constexpr bool operator==(const str& s) const { return len == s.len && cmd_strcmp(data, s.data) == 0; }
 
     template <size_t n>
     constexpr void operator+=(const static_string<n>& str) {
@@ -56,7 +91,7 @@ struct static_string {
         len += str.len;
     }
 
-    constexpr void append(const char* str) { append(str, __builtin_strlen(str)); }
+    constexpr void append(const char* str) { append(str, cmd_strlen(str)); }
     constexpr void append(const char* str, size_t length) {
         std::copy_n(str, length, data + len);
         len += length;
@@ -202,7 +237,7 @@ protected:
         ([&](const char *a, size_t size_a) {
             size_t j{};
             ([&](const char *b, size_t size_b) {
-                if (ok) ok = size_a != size_b || __builtin_strcmp(a, b) != 0 || i == j;
+                if (ok) ok = size_a != size_b || cmd_strcmp(a, b) != 0 || i == j;
                 j++;
             }(opts::name.data, opts::name.len), ...);
             i++;
@@ -233,7 +268,7 @@ protected:
     template <size_t index, static_string option>
     static constexpr size_t optindex_impl() {
         if constexpr (index >= sizeof...(opts)) return index;
-        else if constexpr (__builtin_strcmp(opt_names[index], option.data) == 0) return index;
+        else if constexpr (cmd_strcmp(opt_names[index], option.data) == 0) return index;
         else return optindex_impl<index + 1, option>();
     }
 
@@ -359,8 +394,8 @@ public:
         msg.append(help_message_raw.data, help_message_raw.len);
         return msg;
     }
-protected:
 
+protected:
     /// This callback is called whenever an error occurs during parsing.
     ///
     /// \param errmsg An error message that describes what went wrong.
@@ -414,23 +449,18 @@ protected:
 
     template <typename file_data_type>
     static file_data_type map_file(std::string_view path) {
+#if USE_MMAP
         int fd = ::open(path.data(), O_RDONLY);
-        if (fd < 0) [[unlikely]]
-            ERR;
+        if (fd < 0) ERR;
 
         struct stat s {};
-        if (::fstat(fd, &s)) [[unlikely]]
-            ERR;
+        if (::fstat(fd, &s)) ERR;
         auto sz = size_t(s.st_size);
-        if (sz == 0) [[unlikely]]
-            ERR;
+        if (sz == 0) return {};
 
         auto* mem = (char*) ::mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-        if (mem == MAP_FAILED) [[unlikely]]
-            ERR;
-
-        if (::close(fd)) [[unlikely]]
-            ERR;
+        if (mem == MAP_FAILED) ERR;
+        ::close(fd);
 
         /// Construct the file contents.
         typename file_data_type::contents_type ret;
@@ -438,14 +468,28 @@ protected:
         if constexpr (requires { ret.assign(pointer, sz); }) ret.assign(pointer, sz);
         else if constexpr (requires { ret.assign(pointer, pointer + sz); }) ret.assign(pointer, pointer + sz);
         else RAISE_COMPILE_ERROR("file_data_type::contents_type must have an assign method that takes a pointer and a size_t (or a begin and end iterator) as arguments.");
-
-        if (::munmap(mem, sz)) [[unlikely]]
-            ERR;
+        ::munmap(mem, sz);
 
         file_data_type dat;
         dat.path = path;
         dat.contents = std::move(ret);
         return dat;
+#else
+        /// Read the file manually.
+        std::ifstream heresy{path.data()};
+        if (not heresy) ERR;
+
+        using it = std::istreambuf_iterator<char>;
+        typename file_data_type::contents_type ret;
+        if constexpr (requires { ret.assign(it(heresy), it()); }) ret.assign(it(heresy), it());
+        else if constexpr (requires { ret.assign(it(heresy), {}); }) ret.assign(it(heresy), {});
+        else RAISE_COMPILE_ERROR("file_data_type::contents_type must have an assign method that takes a pointer and a size_t (or a begin and end iterator) as arguments.");
+
+        file_data_type dat;
+        dat.path = path;
+        dat.contents = std::move(ret);
+        return dat;
+#endif
     }
 
     template <typename type>
@@ -626,7 +670,7 @@ public:
 
         for (argi = 1; argi < argc; argi++) {
             if (has_error) return;
-            const std::string opt_str{argv[argi], __builtin_strlen(argv[argi])};
+            const std::string opt_str{argv[argi], cmd_strlen(argv[argi])};
 
             if (!(handle_option<opts, opts::name>(opt_str) || ...)) {
                 if (!(handle_positional<opts>(opt_str) || ...)) {
@@ -647,4 +691,6 @@ public:
 
 #undef RAISE_COMPILE_ERROR
 #undef ERR
+#undef cmd_strlen
+#undef cmd_strcmp
 #endif // CLOPTS_H
