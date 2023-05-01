@@ -329,6 +329,20 @@ public:
         else static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
     }
 
+    /// Get the value of an option or a default value if the option was not found.
+    ///
+    /// \param default_ The default value to return if the option was not found.
+    /// \return default_ if the option was not found.
+    /// \return a copy of the option value if the option was found.
+    template <static_string s>
+    static constexpr auto get_or(auto default_) {
+        constexpr auto sz = optindex_impl<0, s>();
+        if constexpr (sz < sizeof...(opts)) {
+            if (!opts_found[optindex<s>()]) return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(default_);
+            return *get_impl<s>();
+        } else static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
+    }
+
 protected:
     static constexpr auto make_help_message() -> help_string_t {
         help_string_t msg{};

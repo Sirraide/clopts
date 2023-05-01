@@ -85,12 +85,23 @@ the option is not found. If the option is a `flag` (see below), it instead retur
 ```c++
 options::parse(argc, argv);
 if (auto* size = options::get<"--size">()) {
-    /// do something
+    /// Do something.
 }
 ```
 
 Note that if no option with the name `--size` exists, you'll get a 
 compile-time error.
+
+Alternatively, the `get_or<>(value)` function can be used to get either the option value or a default value
+if the option wasn’t found. Note that this function creates a copy of the option value and may thus incur extra
+overhead if the option value happens to be a large string. If `value` is returned, it is first `static_cast` to
+the option type.
+```c++
+options::parse(argc, argv);
+
+/// Default size is 10.
+std::cout << "Size: " << options::get_or<"--size">(10) << "\n";
+```
 
 ### Error Handling
 This section only concerns errors that occur when parsing the options;
