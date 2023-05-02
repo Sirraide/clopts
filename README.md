@@ -24,30 +24,29 @@ library:
 #include <clopts.hh>
 using namespace command_line_options;
 
-int x = 42;
-static void print_42_and_exit(void* arg, std::string_view, std::string_view) {
+static void print_number_and_exit(void* arg, std::string_view) {
     int* i = reinterpret_cast<int*>(arg);
     std::cout << *i;
     std::exit(0);
 }
 
 using options = clopts< // clang-format off
-    positional<"file", "The name of the file", file_data, true>,
+    positional<"file", "The name of the file", file<std::vector<std::byte>>, true>,
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
     multiple<option<"--int", "Integers", int64_t, true>>,
     flag<"--frobnicate", "Whether to frobnicate">,
-    func<"--func", "Print 42 and exit", print_42_and_exit, (void*) &x>,
+    func<"--func", "Print 42 and exit", print_number_and_exit>,
     help<>
 >; // clang-format on
 
 int main(int argc, char** argv) {
-    options::parse(argc, argv);
-    if (auto* ints = options::get<"--int">()) {
-        for (const auto& i : *ints) std::cout << i << "\n";
-    } else {
-        std::cout << "No ints!\n";
-    }
+    int number = 42;
+    options::parse(argc, argv, &number);
+    
+    auto ints = options::get<"--int">();
+    if (ints->empty()) std::cout << "No ints!\n";
+    else for (const auto& i : *ints) std::cout << i << "\n";
 }
 ```
 
@@ -81,7 +80,8 @@ section below.
 
 ### Accessing Option Values
 The `get<>()` function returns a pointer to an option value, or nullptr if
-the option is not found. If the option is a `flag` (see below), it instead returns a `true` if the option was found, and `false` if it wasn’t.
+the option is not found, unless the option is a `multiple` option (see below). 
+If the option is a `flag` (see below), it instead returns a `true` if the option was found, and `false` if it wasn’t.
 ```c++
 options::parse(argc, argv);
 if (auto* size = options::get<"--size">()) {
@@ -220,9 +220,9 @@ of the `clopts` type.
 You can specify a custom help message handler to override the default behaviour by adding
 it to the `help` type as a template parameter:
 ```c++
-static void custom_help(void* msg, std::string_view, std::string_view) {
-    std::cerr << *reinterpret_cast<std::string*>(msg) << "\n";
-    std::cerr << "\nAdditional help information goes here.\n";
+static void custom_help(std::string_view msg) {
+    std::cerr << msg << "\n";
+    std::cerr << "Additional help information goes here.\n";
     std::exit(1);
 }
 
@@ -231,16 +231,13 @@ clopts<
 >;
 ```
 
-The complex signature required for such a function is rather unfortunate, but there will be no simple
-of avoiding it until C++ allows `reinterpret_cast` to be used in constant expressions.
-
 ### Meta-Option Type: `multiple<>`
-The `multiple` option type can not be used on its own and instead wraps another option and modifies it such that multiple occurences of that option are allowed:
+The `multiple` option type can not be used on its own and instead wraps another option and modifies it such that multiple occurrences of that option are allowed:
 ```c++
 multiple<option<"--int", "A number", int64_t>>
 ```
-Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns a pointer to a `std::vector` of the option result type instead (e.g in the case of the `--int` option above, it will return a `std::vector<int64_t>*`).
-
+Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns a pointer to a (possibly empty) `std::vector` of the option result type instead (e.g in the case of the `--int` option above, it will return a `std::vector<int64_t>*`). It never returns `nullptr`. However, 
+`get_or<>()` will still the default value if only if the option wasn’t found.
 
 #### **Properties**
 * If the wrapped option is required, then it is required to be present at least once.
@@ -252,22 +249,34 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 ### Option Type: `func`
 A `func` defines a callback that is called by the parser when the
 option is encountered. You can specify additional data to be passed
-to the callback in the form of a `void*`. Furthermore, the parser
-will pass the option name and value (if there is one) to the callback
-as `std::string_view`s.
+to the callback in the form of a `void*`; this pointer is passed as
+the optional third parameter to the `parse()` function. 
 
-A `func` option can occur multiple times.
+Furthermore, if the specified function takes a `std::string_view`, the parser
+will pass the option value to the callback, and if the function
+takes two `std::string_view`s, the parser will pass the option name
+and value to the callback. The `void*`, if present, must be the
+first parameter. The same `void*` passed to `parse()` is passed to
+all `func` options.
+
+A `func` option can always occur multiple times, which is why `multiple<func<>>` is invalid.
 
 The following is an example of how to use the `func` option type:
 ```c++
-int x = 42;
-static void print_42_and_exit(void* arg, std::string_view, std::string_view) {
+static void print_number_and_exit(void* arg) {
     int* i = reinterpret_cast<int*>(arg);
     std::cout << *i;
     std::exit(0);
 }
 
-func<"--print42", "Print 42 and exit", print_42_and_exit, (void*) &x>,
+using options = clopts<
+    func<"--print42", "Print 42 and exit", print_number_and_exit>
+>;
+
+int main(int argc, char** argv) {
+    int x = 42;
+    options::parse(argc, argv, &x);
+}
 ```
 
 It is a compile-time error to call `get<>()` on a `func` option.

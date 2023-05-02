@@ -7,7 +7,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 add_library(options INTERFACE)
 target_compile_options(options INTERFACE
         -Wall -Wextra -Wundef -Werror=return-type -Wconversion -Wpedantic
-        -fdiagnostics-color=always)
+        -fdiagnostics-color=always $<$<CXX_COMPILER_ID:Clang>:-fcolor-diagnostics>)
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(options INTERFACE -O3)
 else ()
