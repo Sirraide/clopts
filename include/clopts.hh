@@ -62,8 +62,8 @@ constexpr inline int CLOPTS_STRCMP(const char* a, const char* b) {
 /// Use with caution because it can raise an ICE when compiling with recent versions of GCC.
 ///
 /// This loops over \c pack, so long as \c cond is true, making each element of
-/// the pack accessible under the name \c name. The body is wrapped in a loop so
-/// we can use \c break to exit early.
+/// the pack accessible under the name \c name. Use \c return \c true to \c continue
+/// and \c return \c false to \c break.
 #define CLOPTS_LOOP(name, pack, cond, ...) \
     ([&] <typename name> () -> bool { if (cond) { __VA_ARGS__ return true; } return false; }.template operator() <pack> () and ...)
 
@@ -461,14 +461,16 @@ class clopts {
     }
 
 public:
-    /// Get the value of an option.
+    /// \brief Get the value of an option.
     ///
-    /// This is not [[nodiscard]] because that raises an ICE when compiling
+    /// This is not \c [[nodiscard]] because that raises an ICE when compiling
     /// with some older versions of GCC.
     ///
-    /// \return true/false if the option is a flag
-    /// \return nullptr if the option was not found
+    /// \return \c true / \c false if the option is a flag
+    /// \return \c nullptr if the option was not found
     /// \return a pointer to the value if the option was found
+    ///
+    /// \see get_or()
     template <detail::static_string s>
     static constexpr auto get() {
         /// Check if the option exists before calling get_impl<>() so we trigger the static_assert
@@ -478,11 +480,15 @@ public:
         else static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
     }
 
-    /// Get the value of an option or a default value if the option was not found.
+    /// \brief Get the value of an option or a default value if the option was not found.
+    ///
+    /// The default value is \c static_cast to the type of the option value.
     ///
     /// \param default_ The default value to return if the option was not found.
-    /// \return default_ if the option was not found.
+    /// \return \c default_ if the option was not found.
     /// \return a copy of the option value if the option was found.
+    ///
+    /// \see get()
     template <detail::static_string s>
     static constexpr auto get_or(auto default_) {
         constexpr auto sz = optindex_impl<0, s>();
