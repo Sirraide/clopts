@@ -8,15 +8,15 @@
 #include <iostream>
 #include <string>
 
-#ifndef USE_MMAP
+#ifndef CLOPTS_USE_MMAP
 #    ifdef __linux__
-#        define USE_MMAP 1
+#        define CLOPTS_USE_MMAP 1
 #    else
-#        define USE_MMAP 0
+#        define CLOPTS_USE_MMAP 0
 #    endif
 #endif
 
-#if USE_MMAP
+#if CLOPTS_USE_MMAP
 #    include <fcntl.h>
 #    include <sys/mman.h>
 #    include <sys/stat.h>
@@ -663,7 +663,7 @@ private:
             return {};
         };
 
-#if USE_MMAP
+#if CLOPTS_USE_MMAP
         int fd = ::open(path.data(), O_RDONLY);
         if (fd < 0) return err(path);
 
