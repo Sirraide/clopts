@@ -365,13 +365,25 @@ class clopts {
 
     /// Make sure no two options have the same name.
     static consteval bool check_duplicate_options() {
-        bool has_duplicate = false;
-        CLOPTS_LOOP(opt, opts, not has_duplicate, {
-            CLOPTS_LOOP(opt2, opts, not has_duplicate, {
-                has_duplicate = opt::name == opt2::name;
+        /// State is ok initially.
+        bool ok = true;
+        std::size_t i = 0;
+
+        /// Iterate over each option for each option.
+        CLOPTS_LOOP(opt, opts, ok, {
+            std::size_t j = 0;
+            CLOPTS_LOOP(opt2, opts, ok, {
+                /// If the options are not the same, but their names are the same
+                /// then this is an error. Iteration will stop at this point because
+                /// \c ok is also the condition for the two loops.
+                ok = i == j or opt::name != opt2::name;
+                j++;
             });
+            i++;
         });
-        return has_duplicate;
+
+        /// Return whether everything is ok.
+        return ok;
     }
 
     /// Make sure there is at most one multiple<positional<>> option.
