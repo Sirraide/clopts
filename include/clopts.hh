@@ -228,6 +228,31 @@ struct static_string {
     [[nodiscard]] constexpr auto sv() const -> std::string_view { return {data, len}; }
 };
 
+/// Validate option values.
+template <
+    detail::static_string _name,
+    detail::static_string _description,
+    typename _type>
+struct validate {
+    /// Make sure this is a valid option.
+    static_assert(sizeof _description.data < 512, "Description may not be longer than 512 characters");
+    static_assert(_name.len > 0, "Option name may not be empty");
+    static_assert(sizeof _name.data < 256, "Option name may not be longer than 256 characters");
+    static_assert(!std::is_void_v<_type>, "Option type may not be void. Use bool instead");
+    static_assert( // clang-format off
+        detail::is_same<_type, std::string,
+            bool,
+            double,
+            int64_t,
+            detail::callback_arg_type,
+            detail::callback_noarg_type
+        > or detail::is_vector_v<_type> or requires { _type::is_file_data; },
+        "Option type must be std::string, bool, int64_t, double, file_data, callback, or a vector thereof"
+    ); // clang-format on
+
+    constexpr validate() = delete;
+};
+
 /// Default help handler.
 inline void default_help_handler(std::string_view msg) {
     std::cerr << msg;
@@ -249,23 +274,7 @@ template <
     detail::static_string _description = "",
     typename _type = std::string,
     bool required = false>
-struct option {
-    /// Make sure this is a valid option.
-    static_assert(sizeof _description.data < 512, "Description may not be longer than 512 characters");
-    static_assert(_name.len > 0, "Option name may not be empty");
-    static_assert(sizeof _name.data < 256, "Option name may not be longer than 256 characters");
-    static_assert(!std::is_void_v<_type>, "Option type may not be void. Use bool instead");
-    static_assert( // clang-format off
-        detail::is_same<_type, std::string,
-            bool,
-            double,
-            int64_t,
-            detail::callback_arg_type,
-            detail::callback_noarg_type
-        > or detail::is_vector_v<_type> or requires { _type::is_file_data; },
-        "Option type must be std::string, bool, int64_t, double, file_data, callback, or a vector thereof"
-    ); // clang-format on
-
+struct option : detail::validate<_name, _description, _type> {
     using type = _type;
     static constexpr inline decltype(_name) name = _name;
     static constexpr inline decltype(_description) description = _description;
@@ -275,6 +284,26 @@ struct option {
 
     constexpr option() = delete;
 };
+
+namespace experimental {
+/// Base option type.
+template <
+    detail::static_string _name,
+    detail::static_string _description = "",
+    typename _type = std::string,
+    bool required = false>
+struct short_option : detail::validate<_name, _description, _type> {
+    using type = _type;
+    static constexpr inline decltype(_name) name = _name;
+    static constexpr inline decltype(_description) description = _description;
+    static constexpr inline bool is_flag = std::is_same_v<_type, bool>;
+    static constexpr inline bool is_required = required;
+    static constexpr inline bool is_short = true;
+    static constexpr inline bool option_tag = true;
+
+    constexpr short_option() = delete;
+};
+} // namespace experimental
 
 /// A file.
 template <typename contents_type_t = std::string>
@@ -386,6 +415,27 @@ class clopts {
         return ok;
     }
 
+    /// Make sure that no option has a prefix that is a short option.
+    static consteval bool check_short_opts() {
+        /// State is ok initially.
+        bool ok = true;
+        std::size_t i = 0;
+
+        /// Iterate over each option for each option.
+        CLOPTS_LOOP(opt, opts, ok, {
+            std::size_t j = 0;
+            CLOPTS_LOOP(opt2, opts, ok, {
+                /// Check the condition.
+                ok = i == j or not requires { opt::is_short; } or not opt2::name.sv().starts_with(opt::name.sv());
+                j++;
+            });
+            i++;
+        });
+
+        /// Return whether everything is ok.
+        return ok;
+    }
+
     /// Make sure there is at most one multiple<positional<>> option.
     static consteval size_t validate_multiple() {
         return (... + (requires { opts::is_multiple; } and detail::is_positional_v<opts>) );
@@ -393,6 +443,7 @@ class clopts {
 
     /// Make sure we don’t have invalid option combinations.
     static_assert(check_duplicate_options(), "Two different options may not have the same name");
+    static_assert(check_short_opts(), "Option name may not start with the name of a short option");
     static_assert(validate_multiple() <= 1, "Cannot have more than one multiple<positional<>> option");
 
     /// Various types.
@@ -773,18 +824,20 @@ private:
     static bool handle_opt_with_arg(std::string_view opt_str) {
         using opt_type = typename opt::type;
 
-        /// --option=value
+        /// --option=value or short opt.
         if (opt_str.size() > opt::name.len) {
-            /// If the string starts with the option name not followed by '=', then
-            /// this isn’t the right option.
-            if (opt_str[opt::name.len] != '=') return false;
+            /// Parse the rest of the option as the value if we have a '=' or if this is a short option.
+            if (opt_str[opt::name.len] == '=' or requires { opt::is_short; }) {
+                /// Otherwise, parse the value.
+                auto opt_start_offs = opt::name.len + (opt_str[opt::name.len] == '=');
+                const auto opt_name = opt_str.substr(0, opt_start_offs);
+                const auto opt_val = opt_str.substr(opt_start_offs);
+                dispatch_option_with_arg<opt, is_multiple>(opt_name, opt_val);
+                return true;
+            }
 
-            /// Otherwise, parse the value.
-            const auto opt_start_offs = opt::name.len + 1;
-            const auto opt_name = opt_str.substr(0, opt_start_offs);
-            const auto opt_val = opt_str.substr(opt_start_offs);
-            dispatch_option_with_arg<opt, is_multiple>(opt_name, opt_val);
-            return true;
+            /// Otherwise, this isn’t the right option.
+            return false;
         }
 
         /// Handle the option. If we get here, we know that the option name that we’ve
