@@ -789,9 +789,11 @@ private:
     static auto parse_number(std::string_view s, auto parse_func) -> number_type {
         char* pos{};
         errno = 0;
-        auto i = parse_func(s.data(), &pos, 10);
+        number_type i{};
+        if constexpr (requires { parse_func(s.data(), &pos, 10); }) i = number_type(parse_func(s.data(), &pos, 10));
+        else i = number_type(parse_func(s.data(), &pos));
         if (errno == ERANGE or pos != s.end()) handle_error(s, " does not appear to be a valid ", name.sv());
-        return number_type(i);
+        return i;
     }
 
     /// Parse an option value.
