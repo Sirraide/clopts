@@ -259,6 +259,72 @@ inline void default_help_handler(std::string_view msg) {
     std::exit(0);
 }
 
+template <typename file_data_type>
+static file_data_type map_file(
+    std::string_view path,
+    auto error_handler = [](std::string&& msg) { std::cerr << msg << "\n"; std::exit(1); }
+) {
+    const auto err = [&](std::string_view p) -> file_data_type {
+        std::string msg = "Could not read file \"";
+        msg += p;
+        msg += "\": ";
+        msg += ::strerror(errno);
+        error_handler(std::move(msg));
+        return {};
+    };
+
+#if CLOPTS_USE_MMAP
+    int fd = ::open(path.data(), O_RDONLY);
+    if (fd < 0) return err(path);
+
+    struct stat s {};
+    if (::fstat(fd, &s)) return err(path);
+    auto sz = size_t(s.st_size);
+    if (sz == 0) return {};
+
+    auto* mem = (char*) ::mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    if (mem == MAP_FAILED) return err(path);
+    ::close(fd);
+
+    /// Construct the file contents.
+    typename file_data_type::contents_type ret;
+    auto pointer = reinterpret_cast<typename file_data_type::element_pointer>(mem);
+    if constexpr (requires { ret.assign(pointer, sz); }) ret.assign(pointer, sz);
+    else if constexpr (requires { ret.assign(pointer, pointer + sz); }) ret.assign(pointer, pointer + sz);
+    else CLOPTS_ERR("file_data_type::contents_type must have a callable assign member that takes a pointer and a size_t (or a begin and end iterator) as arguments.");
+    ::munmap(mem, sz);
+
+#else
+    using contents_type = typename file_data_type::contents_type;
+
+    /// Read the file manually.
+    auto f = std::fopen(path.data(), "rb");
+    if (not f) return err(path);
+
+    /// Get the file size.
+    std::fseek(f, 0, SEEK_END);
+    auto sz = std::size_t(std::ftell(f));
+    std::fseek(f, 0, SEEK_SET);
+
+    /// Read the file.
+    contents_type ret;
+    ret.resize(sz);
+    std::size_t n_read = 0;
+    while (n_read < sz) {
+        auto n = std::fread(ret.data() + n_read, 1, sz - n_read, f);
+        if (n < 0) return err(path);
+        if (n == 0) break;
+        n_read += n;
+    }
+#endif
+
+    /// Construct the file data.
+    file_data_type dat;
+    dat.path = path;
+    dat.contents = std::move(ret);
+    return dat;
+}
+
 } // namespace detail
 
 /// ===========================================================================
@@ -721,69 +787,6 @@ private:
         return buffer;
     }
 
-    template <typename file_data_type>
-    static file_data_type map_file(std::string_view path) {
-        static const auto err = [](std::string_view p) -> file_data_type {
-            std::string msg = "Could not read file \"";
-            msg += p;
-            msg += "\": ";
-            msg += ::strerror(errno);
-            handle_error(std::move(msg));
-            return {};
-        };
-
-#if CLOPTS_USE_MMAP
-        int fd = ::open(path.data(), O_RDONLY);
-        if (fd < 0) return err(path);
-
-        struct stat s {};
-        if (::fstat(fd, &s)) return err(path);
-        auto sz = size_t(s.st_size);
-        if (sz == 0) return {};
-
-        auto* mem = (char*) ::mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-        if (mem == MAP_FAILED) return err(path);
-        ::close(fd);
-
-        /// Construct the file contents.
-        typename file_data_type::contents_type ret;
-        auto pointer = reinterpret_cast<typename file_data_type::element_pointer>(mem);
-        if constexpr (requires { ret.assign(pointer, sz); }) ret.assign(pointer, sz);
-        else if constexpr (requires { ret.assign(pointer, pointer + sz); }) ret.assign(pointer, pointer + sz);
-        else CLOPTS_ERR("file_data_type::contents_type must have an assign method that takes a pointer and a size_t (or a begin and end iterator) as arguments.");
-        ::munmap(mem, sz);
-
-#else
-        using contents_type = typename file_data_type::contents_type;
-
-        /// Read the file manually.
-        auto f = std::fopen(path.data(), "rb");
-        if (not f) return err(path);
-
-        /// Get the file size.
-        std::fseek(f, 0, SEEK_END);
-        auto sz = std::size_t(std::ftell(f));
-        std::fseek(f, 0, SEEK_SET);
-
-        /// Read the file.
-        contents_type ret;
-        ret.resize(sz);
-        std::size_t n_read = 0;
-        while (n_read < sz) {
-            auto n = std::fread(ret.data() + n_read, 1, sz - n_read, f);
-            if (n < 0) return err(path);
-            if (n == 0) break;
-            n_read += n;
-        }
-#endif
-
-        /// Construct the file data.
-        file_data_type dat;
-        dat.path = path;
-        dat.contents = std::move(ret);
-        return dat;
-    }
-
     /// Helper to parse an integer or double.
     template <typename number_type, detail::static_string name>
     static auto parse_number(std::string_view s, auto parse_func) -> number_type {
@@ -808,7 +811,7 @@ private:
         else if constexpr (std::is_same_v<base_type, std::string>) return std::string{opt_val};
 
         /// If it’s a file, read its contents.
-        else if constexpr (requires { base_type::is_file_data; }) return map_file<base_type>(opt_val);
+        else if constexpr (requires { base_type::is_file_data; }) return detail::map_file<base_type>(opt_val, error_handler);
 
         /// Parse an integer or double.
         else if constexpr (std::is_same_v<base_type, integer>) return parse_number<integer, "integer">(opt_val, std::strtoull);
