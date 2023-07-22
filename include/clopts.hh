@@ -298,21 +298,20 @@ static file_data_type map_file(
     using contents_type = typename file_data_type::contents_type;
 
     /// Read the file manually.
-    auto f = std::fopen(path.data(), "rb");
+    std::unique_ptr<FILE, decltype(&std::fclose)> f{std::fopen(path.data(), "rb"), std::fclose};
     if (not f) return err(path);
-    at_scope_exit<decltype([&] { std::fclose(f); })> _close_file;
 
     /// Get the file size.
-    std::fseek(f, 0, SEEK_END);
-    auto sz = std::size_t(std::ftell(f));
-    std::fseek(f, 0, SEEK_SET);
+    std::fseek(f.get(), 0, SEEK_END);
+    auto sz = std::size_t(std::ftell(f.get()));
+    std::fseek(f.get(), 0, SEEK_SET);
 
     /// Read the file.
     contents_type ret;
     ret.resize(sz);
     std::size_t n_read = 0;
     while (n_read < sz) {
-        auto n = std::fread(ret.data() + n_read, 1, sz - n_read, f);
+        auto n = std::fread(ret.data() + n_read, 1, sz - n_read, f.get());
         if (n < 0) return err(path);
         if (n == 0) break;
         n_read += n;
