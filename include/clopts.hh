@@ -300,7 +300,7 @@ static file_data_type map_file(
     /// Read the file manually.
     auto f = std::fopen(path.data(), "rb");
     if (not f) return err(path);
-    at_scope_exit _close_file = [&] { std::fclose(f); };
+    at_scope_exit<decltype([&] { std::fclose(f); })> _close_file;
 
     /// Get the file size.
     std::fseek(f, 0, SEEK_END);
