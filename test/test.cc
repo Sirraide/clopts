@@ -11,7 +11,7 @@ static void print_number_and_exit(void* arg, std::string_view) {
 ///  - alias<"-f", "--filename">
 
 static void custom_help(std::string_view msg) {
-    std::cerr << msg << "\n";
+    std::cerr << "./test " << msg << "\n";
     std::cerr << "Additional help information goes here.\n";
     std::exit(1);
 }
@@ -21,6 +21,7 @@ using options = clopts< // clang-format off
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
     multiple<option<"--int", "Integers", int64_t, true>>,
+    option<"--lang", "Language option", values<1, 27, 42, 58>>,
     flag<"--frobnicate", "Whether to frobnicate">,
     func<"--func", "Print 42 and exit", print_number_and_exit>,
     help<custom_help>
@@ -36,5 +37,9 @@ int main(int argc, char** argv) {
 
     if (auto f = options::get<"file">()) {
         std::cout << f->contents << "\n";
+    }
+
+    if (auto lang = options::get<"--lang">()) {
+        std::cout << "Language: " << *lang << "\n";
     }
 }

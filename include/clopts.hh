@@ -76,6 +76,23 @@ constexpr inline int CLOPTS_STRCMP(const char* a, const char* b) {
 /// Use with caution because it can raise an ICE when compiling with recent versions of GCC.
 #define CLOPTS_COND(cond, t, f) [&]<bool _x = cond>() { if constexpr (_x) return t; else return f; } ()
 
+/// Constexpr to_string for integers. Returns the number of bytes written.
+constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
+    const auto start = out;
+    if (i < 0) {
+        *out++ = '-';
+        i = -i;
+    }
+
+    while (i) {
+        *out++ = char('0' + char(i % 10));
+        i /= 10;
+    }
+
+    std::reverse(start, out);
+    return std::size_t(out - start);
+}
+
 /// Check if two types are the same.
 template <typename a, typename ...bs>
 concept is = (std::is_same_v<std::remove_cvref_t<a>, std::remove_cvref_t<bs>> or ...);
@@ -85,10 +102,19 @@ template <typename a, typename ...bs>
 concept is_same = (std::is_same_v<a, bs> or ...);
 
 /// Check if an operand type is a vector.
-template <typename t> struct is_vector_s;
-template <typename t> struct is_vector_s<std::vector<t>> { static constexpr bool value = true; };
-template <typename t> struct is_vector_s { static constexpr bool value = false; };
-template <typename t> concept is_vector_v = is_vector_s<t>::value;
+template <typename t> struct test_vector;
+template <typename t> struct test_vector<std::vector<t>> {
+    static constexpr bool value = true;
+    using type = t;
+};
+
+template <typename t> struct test_vector {
+    static constexpr bool value = false;
+    using type = t;
+};
+
+template <typename t> concept is_vector_v = test_vector<t>::value;
+template <typename t> using remove_vector_t = typename test_vector<t>::type;
 
 /// Get the base type of an option.
 template <typename t> struct base_type_s;
@@ -130,6 +156,14 @@ concept has_argument = not is<type, bool, callback_noarg_type>;
 /// the builtin help option.
 template <typename opt>
 concept should_print_argument_type = has_argument<typename opt::type> and not requires { opt::is_help_option; };
+
+/// Helper for static asserts.
+template <typename t>
+concept always_false = false;
+
+/// Not a concept because we can’t pass packs as the first parameter of a concept.
+template <typename first, typename ...rest>
+static constexpr bool assert_same_type = (std::is_same_v<first, rest> and ...);
 
 /// Wrap an arbitrary function in a lambda.
 template <auto cb> struct make_lambda_s;
@@ -179,6 +213,15 @@ struct make_lambda_s<cb> {
 template <auto cb>
 using make_lambda = make_lambda_s<cb>; // clang-format on
 
+template <typename first, typename... rest>
+struct first_type {
+    using type = first;
+};
+
+/// Get the first element of a pack.
+template <typename... rest>
+using first_type_t = typename first_type<rest...>::type;
+
 /// Execute code at end of scope.
 template <typename lambda>
 struct at_scope_exit {
@@ -203,8 +246,14 @@ struct static_string {
 
     /// Check if two strings are equal.
     template <typename str>
+    requires requires { std::declval<str>().len; }
     [[nodiscard]] constexpr bool operator==(const str& s) const {
         return len == s.len && CLOPTS_STRCMP(data, s.data) == 0;
+    }
+
+    /// Check if this is equal to a string.
+    [[nodiscard]] constexpr bool operator==(std::string_view s) const {
+        return sv() == s;
     }
 
     /// Append to this string.
@@ -226,36 +275,167 @@ struct static_string {
 
     /// Get the string as a \c std::string_view.
     [[nodiscard]] constexpr auto sv() const -> std::string_view { return {data, len}; }
+
+    static constexpr bool is_static_string = true;
 };
 
-/// Validate option values.
+template <std::size_t size>
+struct string_or_int {
+    detail::static_string<size> s{};
+    std::int64_t integer{};
+    bool is_integer{};
+
+    constexpr string_or_int(const char (&data)[size]) {
+        std::copy_n(data, size, s.data);
+        s.len = size - 1;
+        is_integer = false;
+    }
+
+    constexpr string_or_int(std::int64_t integer)
+        : integer{integer}
+        , is_integer{true} {}
+};
+
+string_or_int(std::int64_t) -> string_or_int<1>;
+
+/// Struct for storing allowed option values.
+template <typename _type, auto... data>
+struct values_impl {
+    using type = _type;
+    constexpr values_impl() = delete;
+
+    static constexpr bool is_valid_option_value(const type& val) {
+        auto test = [val]<auto value>() -> bool {
+            if constexpr (value.is_integer) return value.integer == val;
+            else return value.s == val;
+        };
+
+        return (test.template operator()<data>() or ...);
+    }
+
+    static constexpr auto print_values(char* out) -> std::size_t {
+        /// TODO: Wrap and indent every 10 or so values?
+        bool first = true;
+        auto append = [&]<auto value>() -> std::size_t {
+            if (first) first = false;
+            else {
+                std::copy_n(", ", 2, out);
+                out += 2;
+            }
+            if constexpr (value.is_integer) {
+                char s[32]{};
+                auto len = constexpr_to_string(s, value.integer);
+                std::copy_n(s, len, out);
+                out += len;
+                return len;
+            } else {
+                std::copy_n(value.s.data, value.s.len, out);
+                out += value.s.len;
+                return value.s.len;
+            }
+        };
+        return (append.template operator()<data>() + ...) + (sizeof...(data) - 1) * 2;
+    };
+};
+
+template <string_or_int... data>
+concept values_must_be_all_strings_or_all_ints = (data.is_integer and ...) or (not data.is_integer and ...);
+
+/// Values type.
+template <string_or_int... data>
+requires values_must_be_all_strings_or_all_ints<data...>
+struct values : values_impl<std::conditional_t<(data.is_integer and ...), std::int64_t, std::string>, data...> {};
+
+/// Check that an option type is valid.
+template <typename type>
+concept is_valid_option_type = detail::is_same<type, std::string, // clang-format off
+    bool,
+    double,
+    int64_t,
+    detail::callback_arg_type,
+    detail::callback_noarg_type
+> or detail::is_vector_v<type> or requires { type::is_values; } or requires { type::is_file_data; };
+// clang-format on
+
+template <typename _type>
+struct option_type {
+    using type = _type;
+    static constexpr bool is_values = false;
+};
+
+/// Look through values<> to figure out the option type.
+template <auto... vs>
+struct option_type<values<vs...>> {
+    using type = values<vs...>::type;
+    static constexpr bool is_values = true;
+};
+
+template <typename _type>
+using option_type_t = typename option_type<_type>::type;
+
+template <typename _type>
+concept is_values_type_t = option_type<_type>::is_values;
+
 template <
-    detail::static_string _name,
-    detail::static_string _description,
-    typename _type>
-struct validate {
+    static_string _name,
+    static_string _description,
+    typename ty_param,
+    bool required>
+struct opt_impl {
+    /// There are four possible cases we need to handle here:
+    ///   - Simple type: std::string, int64_t, ...
+    ///   - Vector of simple type: std::vector<std::string>, std::vector<int64_t>, ...
+    ///   - Values type: values<...>
+    ///   - Vector of values type: std::vector<values<...>>
+
+    /// The actual type that was passed in.
+    using actual_type = ty_param;
+
+    /// The type stripped of top-level std::vector<>.
+    using actual_type_base = remove_vector_t<actual_type>;
+
+    /// The underlying simple type used to store one element.
+    using simple_type = option_type_t<actual_type_base>;
+
+    /// The type used to store the result of the option. This is either
+    /// the simple type or a std::vector<> thereof.
+    using type = std::conditional_t<is_vector_v<actual_type>, std::vector<simple_type>, simple_type>;
+
     /// Make sure this is a valid option.
     static_assert(sizeof _description.data < 512, "Description may not be longer than 512 characters");
     static_assert(_name.len > 0, "Option name may not be empty");
     static_assert(sizeof _name.data < 256, "Option name may not be longer than 256 characters");
-    static_assert(!std::is_void_v<_type>, "Option type may not be void. Use bool instead");
-    static_assert( // clang-format off
-        detail::is_same<_type, std::string,
-            bool,
-            double,
-            int64_t,
-            detail::callback_arg_type,
-            detail::callback_noarg_type
-        > or detail::is_vector_v<_type> or requires { _type::is_file_data; },
-        "Option type must be std::string, bool, int64_t, double, file_data, callback, or a vector thereof"
-    ); // clang-format on
+    static_assert(not std::is_void_v<type>, "Option type may not be void. Use bool instead");
+    static_assert(
+        is_valid_option_type<type>,
+        "Option type must be std::string, bool, int64_t, double, file_data, values<>, or callback"
+    );
 
-    constexpr validate() = delete;
+    static constexpr inline decltype(_name) name = _name;
+    static constexpr inline decltype(_description) description = _description;
+    static constexpr inline bool is_flag = std::is_same_v<type, bool>;
+    static constexpr inline bool is_values = is_values_type_t<actual_type_base>;
+    static constexpr inline bool is_required = required;
+    static constexpr inline bool option_tag = true;
+
+    static constexpr bool is_valid_option_value(
+        const simple_type& val
+    ) {
+        if constexpr (is_values) return actual_type_base::is_valid_option_value(val);
+        else return true;
+    }
+
+    static constexpr auto print_values(char* out) -> std::size_t {
+        if constexpr (is_values) return actual_type_base::print_values(out);
+        else return 0;
+    }
+
+    constexpr opt_impl() = delete;
 };
 
 /// Default help handler.
-inline void default_help_handler(std::string_view msg) {
-    std::cerr << msg;
+inline void default_help_handler(std::string_view program_name, std::string_view msg) {
+    std::cerr << program_name << " " << msg;
     std::exit(0);
 }
 
@@ -324,7 +504,6 @@ static file_data_type map_file(
     dat.contents = std::move(ret);
     return dat;
 }
-
 } // namespace detail
 
 /// ===========================================================================
@@ -334,32 +513,24 @@ static file_data_type map_file(
 template <typename... opts>
 class clopts;
 
+using detail::values;
+
 /// Base option type.
 template <
     detail::static_string _name,
     detail::static_string _description = "",
-    typename _type = std::string,
+    typename type = std::string,
     bool required = false>
-struct option : detail::validate<_name, _description, _type> {
-    using type = _type;
-    static constexpr inline decltype(_name) name = _name;
-    static constexpr inline decltype(_description) description = _description;
-    static constexpr inline bool is_flag = std::is_same_v<_type, bool>;
-    static constexpr inline bool is_required = required;
-    static constexpr inline bool option_tag = true;
-
-    constexpr option() = delete;
-};
+struct option : detail::opt_impl<_name, _description, type, required> {};
 
 namespace experimental {
-/// Base option type.
+/// Base short option type.
 template <
     detail::static_string _name,
     detail::static_string _description = "",
     typename _type = std::string,
     bool required = false>
-struct short_option : detail::validate<_name, _description, _type> {
-    using type = _type;
+struct short_option : detail::opt_impl<_name, _description, _type, required> {
     static constexpr inline decltype(_name) name = _name;
     static constexpr inline decltype(_description) description = _description;
     static constexpr inline bool is_flag = std::is_same_v<_type, bool>;
@@ -427,13 +598,14 @@ struct flag : option<_name, _description, bool, required> {};
 
 /// The help option.
 template <auto callback = detail::default_help_handler>
-struct help : func<"--help", "Print this help information", callback> {
+struct help : func<"--help", "Print this help information", [] {}> {
+    static constexpr decltype(callback) help_callback = callback;
     static constexpr inline bool is_help_option = true;
 };
 
 /// Multiple meta-option.
 template <typename opt>
-struct multiple : option<opt::name, opt::description, std::vector<typename opt::type>, opt::is_required> {
+struct multiple : option<opt::name, opt::description, std::vector<typename opt::actual_type>, opt::is_required> {
     using base_type = typename opt::type;
     using type = std::vector<typename opt::type>;
     static_assert(not detail::is<base_type, bool>, "Type of multiple<> cannot be bool");
@@ -653,10 +825,13 @@ private:
         /// we know how much padding to insert before actually printing
         /// the description. Also factor in the <> signs around and the
         /// space after the option name, as well as the type name.
+        size_t max_vals_opt_name_len{};
         size_t max_len{};
         auto determine_length = [&]<typename opt> {
             /// Positional options go on the first line, so ignore them here.
             if constexpr (not detail::is_positional_v<opt>) {
+                if constexpr (opt::is_values)
+                    max_vals_opt_name_len = std::max(max_vals_opt_name_len, opt::name.len);
                 max_len = std::max(max_len, CLOPTS_COND (
                     detail::should_print_argument_type<opt>,
                     opt::name.len + (type_name<typename opt::type>().len + sizeof("<> ") - 1),
@@ -695,6 +870,28 @@ private:
         };
         (append.template operator()<opts>(), ...);
 
+        /// If we have any values<> types, print their supported values.
+        if constexpr ((opts::is_values or ...)) {
+            msg.append("\nSupported option values:\n");
+            auto write_opt_vals = [&] <typename opt> () {
+                if constexpr (opt::is_values) {
+                    msg.append("    ");
+                    msg.append(opt::name.data, opt::name.len);
+                    msg.append(":");
+
+                    /// Padding after the name.
+                    for (size_t i = 0; i < max_vals_opt_name_len - opt::name.len + 1; i++)
+                        msg.append(" ");
+
+                    /// Option values.
+                    msg.len += opt::print_values(msg.data + msg.len);
+                    msg.append("\n");
+                }
+            };
+            (write_opt_vals.template operator()<opts>(), ...);
+        }
+
+
         /// Return the combined help message.
         return msg;
     }; // clang-format on
@@ -729,9 +926,26 @@ private:
 
         /// Otherwise, parse the argument.
         else {
-            /// Handle the argument.
-            if constexpr (is_multiple) ref<opt::name>().push_back(make_arg<opt_type>(opt_val));
-            else ref<opt::name>() = make_arg<opt_type>(opt_val);
+            /// Create the argument value.
+            auto value = make_arg<opt_type>(opt_val);
+
+            /// If this option takes a list of values, check that the
+            /// value matches one of them.
+            if constexpr (opt::is_values) {
+                if (not opt::is_valid_option_value(value)) {
+                    handle_error(
+                        "Invalid value for option '",
+                        std::string(opt_str),
+                        "': '",
+                        std::string(opt_val),
+                        "'"
+                    );
+                }
+            }
+
+            /// Set the value.
+            if constexpr (is_multiple) ref<opt::name>().push_back(std::move(value));
+            else ref<opt::name>() = std::move(value);
         }
     }
 
@@ -890,7 +1104,7 @@ private:
             }
         }
 
-        /// Flags and callbacks don't have arguments.
+        /// Flags and callbacks that don't have arguments.
         if constexpr (not detail::has_argument<base_type>) {
             /// Check if the name of this flag matches the entire option string that
             /// we encountered. If we’re just a prefix, then we don’t handle this.
@@ -902,10 +1116,29 @@ private:
             /// If it’s a callable, call it.
             if constexpr (detail::is_callback<base_type>) {
                 /// The builtin help option is handled here. We pass the help message as an argument.
-                if constexpr (requires { opt::is_help_option; }) dispatch_option_with_arg<opt, false>(opt_str, help_message_raw.sv());
+                if constexpr (requires { opt::is_help_option; }) {
+                    /// New API: program name + help message [+ user data].
+                    using sv = std::string_view;
+                    if constexpr (requires { opt::help_callback(sv{}, help_message_raw.sv(), user_data); })
+                        opt::help_callback(sv{argv[0]}, help_message_raw.sv(), user_data);
+                    else if constexpr (requires { opt::help_callback(sv{}, help_message_raw.sv()); })
+                        opt::help_callback(sv{argv[0]}, help_message_raw.sv());
+
+                    /// Compatibility for callbacks that don’t take the program name.
+                    else if constexpr (requires { opt::help_callback(help_message_raw.sv(), user_data); })
+                        opt::help_callback(help_message_raw.sv(), user_data);
+                    else if constexpr (requires { opt::help_callback(help_message_raw.sv()); })
+                        opt::help_callback(help_message_raw.sv());
+
+                    /// Invalid help option callback.
+                    else static_assert(
+                        detail::always_false<opt>,
+                        "Invalid help option signature. Consult the README for more information"
+                    );
+                }
 
                 /// If it’s not the help option, just invoke it.
-                else opt::callback(user_data, opt_str);
+                else { opt::callback(user_data, opt_str); }
             }
 
             /// Option has been handled.

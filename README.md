@@ -9,12 +9,16 @@ misspell the name of an option when trying to access its value.
 Amongst other things, both `--option value` and `--option=value` are supported.
 
 Everything in this library is defined in the `command_line_options` namespace,
-which may be rather long, but it’s intended to be used in conjunction with either `using namespace ` or a namespace alias (e.g. `namespace cmd = command_line_options;`).
+which is rather long to avoid name collisions, but it’s intended to be used in conjunction with either `using namespace ` or a namespace alias (e.g. `namespace cmd = command_line_options;`).
 
-## Build
-You only need to `#include <clopts.hh>` and then you're good to go.
+Note: This is a library for modern C++ and requires a compiler that supports at least C++20. However, `std::format` support
+is *not* required. Note that if you’re using GCC, this library will likely fail to compile on GCC versions older than 11.2 due
+to missing C++20 support or GCC segfaulting.
 
-Note: when this library is added as a CMake subdirectory, the path to `clopts.hh` is automatically added to the include path.
+This library works on Linux and Windows, but is mainly tested on Linux.
+
+## Building
+You only need to `#include <clopts.hh>` and then you're good to go. There is no build step as this is a header-only library. The `test` directory contains a test file you can experiment with, but it isn’t part of the main library.
 
 ## Usage
 ### Example
@@ -35,7 +39,8 @@ using options = clopts< // clang-format off
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
     multiple<option<"--int", "Integers", int64_t, true>>,
-    flag<"--frobnicate", "Whether to frobnicate">,
+    flag<"--test", "Test flag">,
+    option<"--prime", "A prime number", values<2, 3, 5, 7, 11, 13>>,
     func<"--func", "Print 42 and exit", print_number_and_exit>,
     help<>
 >; // clang-format on
@@ -43,7 +48,7 @@ using options = clopts< // clang-format off
 int main(int argc, char** argv) {
     int number = 42;
     options::parse(argc, argv, &number);
-    
+
     auto ints = options::get<"--int">();
     if (ints->empty()) std::cout << "No ints!\n";
     else for (const auto& i : *ints) std::cout << i << "\n";
@@ -67,7 +72,7 @@ clopts<
 > options;
 ```
 
-The types defined by this library are *not* meant to be instantiated.
+The vast majority of types defined by this library are *not* meant to be instantiated.
 
 At runtime, the options are parsed by calling the `parse()` function of
 your `clopts` type, passing it `argc` and `argv`. Note: At the moment, this means that option values are global and that options can only be parsed once. I have yet to encounter a use for parsing command line options multiple times during the runtime of a single program, but support for that may be added in a future release.
@@ -138,7 +143,7 @@ as template parameters.
 using options = clopts<
     option<"--size", "The size of the file", int64_t>,
     positional<"foobar", "Description goes here">,
-    flag<"--frobnicate", "Whether to frobnicate">,
+    flag<"--test", "Test flag">,
 >;        
 ```
 
@@ -162,16 +167,31 @@ option<"--name", "Description", std::string, /* required? */ false>
 #### **Parameters**
 1. The option name, which must be a string literal (at most 256 bytes).
 2. A description of the option, also a string literal (at most 512 bytes).
-3. The type of the option (`std::string`, `file_data`, or `int64_t`). The default is `std::string`.
+3. The type of the option (see below). The default is `std::string`.
 4. Whether the option is required, i.e. whether omitting it is an error.
   The default is `false`.
 
 #### **Types and Arguments**
 The `option` type always takes an argument. (Note: strictly speaking, this is not exactly true as `option` is the base class of most other option types, but users of the library should only use `option<>` with the data types listed above).
 
-In the case of `int64_t`, the argument must be a valid 64-bit integer.
+Supported types for the 3rd template parameter are:
+- `std::string`: Any string.
+- `file<>`: A path to a file that must exist and must be accessible.
+- `int64_t`: A valid (signed) 64-bit integer (as per `std::strtoll`).
+- `double`: A valid floating point number (as per `std::strtod`).
+- `values<>`: See below.
 
-The `file_data` type indicates that the argument should be treated as a path to a file, the contents of which will be loaded into memory. When accessed with `get<>()`, both the path and contents will be returned. If the parser can't load the file (for instance, because it doesn't exist), it will invoke the error handler with an appropriate message, and the option value is left in an indeterminate state.
+The `file<>` type indicates that the argument should be treated as a path to a file, the contents of which will be loaded into memory at parse time (note: lazy loading is *not* supported). When accessed with `get<>()`, both the path and contents will be returned. If the parser can't load the file (for instance, because it doesn't exist), it will invoke the error handler with an appropriate message, and the option value is left in an indeterminate state. The template argument is the type to use for the file
+contents. The default is `std::string`.
+
+The `values<>` type is used to indicate a set of valid values. The values must
+either all be strings or all be integers (doubles are currently not allowed to avoid the usual problems associated with comparing floating-point numbers for equality). For example, possible values for a `values<>` option are:
+```c++
+values<1, 2, 3>
+values<"foo", "bar", "baz">
+```
+
+If the values are strings, `get<>` will return a `std::string`; if the values are integers, `get<>` will return an `int64_t`.
 
 Both `--option value` and `--option=value` are recognised by the parser.
 
@@ -210,18 +230,22 @@ In the examples above, `*get<"bar">()` is always `"opt1"`, and
 `*get<"baz">()` is always `"opt2"`.
 
 ### Option Type: `help<>`
-This is a special option type that takes no arguments and no template parameters and adds a `--help`
+This is a special option type that takes up to one argument and no template parameters and adds a `--help`
 option that simply prints a help message containing the names, types, and
 descriptions of all options and then exits the program. Note: You have to use `help<>`, rather than just `help`.
 
 This message can also be retrieved by calling the static `help()` function
 of the `clopts` type.
 
-You can specify a custom help message handler to override the default behaviour by adding
-it to the `help` type as a template parameter:
+You can specify a custom help message handler to override the default behaviour by adding it to the `help` type as a template parameter. 
+The `void*` data pointer optionally passed to `options::parse()` is passed as the third argument to the help message handler (see also the description of the `func<>` type below). Both the program name and user data argument are optional, but they must always occur in the order indicated below.
 ```c++
-static void custom_help(std::string_view msg) {
-    std::cerr << msg << "\n";
+static void custom_help(
+    std::string_view program_name, 
+    std::string_view msg,
+    void* user_data
+) {
+    std::cerr << program_name << msg << "\n";
     std::cerr << "Additional help information goes here.\n";
     std::exit(1);
 }
@@ -237,10 +261,10 @@ The `multiple` option type can not be used on its own and instead wraps another 
 multiple<option<"--int", "A number", int64_t>>
 ```
 Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns a pointer to a (possibly empty) `std::vector` of the option result type instead (e.g in the case of the `--int` option above, it will return a `std::vector<int64_t>*`). It never returns `nullptr`. However, 
-`get_or<>()` will still the default value if only if the option wasn’t found.
+`get_or<>()` will still the return default value if the option wasn’t found.
 
 #### **Properties**
-* If the wrapped option is required, then it is required to be present at least once.
+* If the wrapped option is marked as required, then it is required to be present at least once.
 * `multiple<>` should only ever be used with `flag`s and `option`s.
 * `multiple<func>` is currently invalid, as `func` options can already occur multiple times.
 * There can only be at most one `multiple<positional<>>` option.
@@ -250,14 +274,16 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 A `func` defines a callback that is called by the parser when the
 option is encountered. You can specify additional data to be passed
 to the callback in the form of a `void*`; this pointer is passed as
-the optional third parameter to the `parse()` function. 
+the optional third parameter to the `parse()` function.
 
-Furthermore, if the specified function takes a `std::string_view`, the parser
+Furthermore, if the specified function takes a `std::string_view`, the option now takes a value, and the parser
 will pass the option value to the callback, and if the function
 takes two `std::string_view`s, the parser will pass the option name
 and value to the callback. The `void*`, if present, must be the
-first parameter. The same `void*` passed to `parse()` is passed to
-all `func` options.
+first parameter. 
+
+The same `void*` passed to `parse()` is passed to
+all `func` options, as well as to the help option if you specify a custom help handler that takes a `void*` as its last parameter.
 
 A `func` option can always occur multiple times, which is why `multiple<func<>>` is invalid.
 
@@ -284,14 +310,17 @@ It is a compile-time error to call `get<>()` on a `func` option.
 ### Custom Option Types
 You can define your own custom option types by inheriting from `option`. For instance the builtin `flag` type is defined as
 ```c++
-template <static_string _name, static_string _description = "", bool required = false>
-struct flag : public option<_name, _description, bool, required> {
-    constexpr flag() = delete;
-};
+template <
+    detail::static_string _name,
+    detail::static_string _description = "",
+    bool required = false>
+struct flag : option<_name, _description, bool, required> {};
 ```
 
 Make sure to use `static_string` if you want to be able to pass a string
 literal as a non-type template parameter.
 
 However, keep in mind that implementing certain features, like the `func` 
-type, would also require modifying the main library code and that the library is not designed to allow for the addition of arbitrary new option types.
+type, would also require modifying the main library code and that the library is not designed to allow for the addition of arbitrary new option types. It is recommended to use the builtin option types whenever possible, and there are no plans to add additional support for user-defined option types. 
+
+At the same time, if you have an idea for an option type that it would make sense supporting, feel free to open an issue or a pull request. Additional option types may be added in the future.
