@@ -1009,7 +1009,7 @@ private:
         number_type i{};
         if constexpr (requires { parse_func(s.data(), &pos, 10); }) i = number_type(parse_func(s.data(), &pos, 10));
         else i = number_type(parse_func(s.data(), &pos));
-        if (errno == ERANGE or pos != s.end()) handle_error(s, " does not appear to be a valid ", name.sv());
+        if (errno == ERANGE or pos != s.data() + s.size()) handle_error(s, " does not appear to be a valid ", name.sv());
         return i;
     }
 
