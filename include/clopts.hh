@@ -1,12 +1,17 @@
 #ifndef CLOPTS_H
 #define CLOPTS_H
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <tuple>
+#include <type_traits>
+#include <vector>
 
 #ifndef CLOPTS_USE_MMAP
 #    ifdef __linux__
