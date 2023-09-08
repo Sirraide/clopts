@@ -602,9 +602,9 @@ template <
 struct flag : option<_name, _description, bool, required> {};
 
 /// The help option.
-template <auto callback = detail::default_help_handler>
+template <auto _help_cb = detail::default_help_handler>
 struct help : func<"--help", "Print this help information", [] {}> {
-    static constexpr decltype(callback) help_callback = callback;
+    static constexpr decltype(_help_cb) help_callback = _help_cb;
     static constexpr inline bool is_help_option = true;
 };
 
@@ -681,7 +681,8 @@ class clopts {
 
     /// Make sure there is at most one multiple<positional<>> option.
     static consteval size_t validate_multiple() {
-        return (... + (requires { opts::is_multiple; } and detail::is_positional_v<opts>) );
+        auto is_mul = []<typename opt>() { return requires { opt::is_multiple; }; };
+        return (... + (is_mul.template operator()<opts>() and detail::is_positional_v<opts>) );
     }
 
     /// Make sure we don’t have invalid option combinations.
@@ -704,6 +705,24 @@ class clopts {
     static inline std::array<bool, sizeof...(opts)> opts_found{};
     static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.data...};
     static inline bool opts_parsed{};
+
+    /// Get the name of an option type.
+    template <typename t>
+    static consteval auto type_name() -> detail::static_string<25> {
+        detail::static_string<25> buffer;
+        if constexpr (detail::is<t, string>) buffer.append("string");
+        else if constexpr (detail::is<t, bool>) buffer.append("bool");
+        else if constexpr (detail::is<t, integer, double>) buffer.append("number");
+        else if constexpr (requires { t::is_file_data; }) buffer.append("file");
+        else if constexpr (detail::is_callback<t>) buffer.append("arg");
+        else if constexpr (detail::is_vector_v<t>) {
+            buffer.append(type_name<typename t::value_type>().data, type_name<typename t::value_type>().len);
+            buffer.append("s");
+        } else {
+            CLOPTS_ERR("Option type must be std::string, bool, integer, double, or void(*)(), or a vector thereof");
+        }
+        return buffer;
+    }
 
     /// Get the index of an option.
     template <size_t index, detail::static_string option>
@@ -837,11 +856,12 @@ private:
             if constexpr (not detail::is_positional_v<opt>) {
                 if constexpr (opt::is_values)
                     max_vals_opt_name_len = std::max(max_vals_opt_name_len, opt::name.len);
-                max_len = std::max(max_len, CLOPTS_COND (
-                    detail::should_print_argument_type<opt>,
-                    opt::name.len + (type_name<typename opt::type>().len + sizeof("<> ") - 1),
-                    opt::name.len
-                ));
+                if constexpr (detail::should_print_argument_type<opt>) {
+                    auto n = type_name<typename opt::type>();
+                    max_len = std::max(max_len, opt::name.len + (n.len + sizeof("<> ") - 1));
+                } else {
+                    max_len = std::max(max_len, opt::name.len);
+                }
             }
         };
         (determine_length.template operator()<opts>(), ...);
@@ -954,6 +974,29 @@ private:
         }
     }
 
+    /// Invoke the help callback of the help option.
+    template <typename opt>
+    static void invoke_help_callback() {
+        /// New API: program name + help message [+ user data].
+        using sv = std::string_view;
+        if constexpr (requires { opt::help_callback(sv{}, sv{}, user_data); })
+            opt::help_callback(sv{argv[0]}, sv{}, user_data);
+        else if constexpr (requires { opt::help_callback(sv{}, sv{}); })
+            opt::help_callback(sv{argv[0]}, help_message_raw.sv());
+
+        /// Compatibility for callbacks that don’t take the program name.
+        else if constexpr (requires { opt::help_callback(sv{}, user_data); })
+            opt::help_callback(help_message_raw.sv(), user_data);
+        else if constexpr (requires { opt::help_callback(sv{}); })
+            opt::help_callback(help_message_raw.sv());
+
+        /// Invalid help option callback.
+        else static_assert(
+            detail::always_false<opt>,
+            "Invalid help option signature. Consult the README for more information"
+        );
+    }
+
     /// This callback is called whenever an error occurs during parsing.
     ///
     /// \param errmsg An error message that describes what went wrong.
@@ -966,7 +1009,7 @@ private:
         auto invoke = [&]<typename opt> {
             if constexpr (requires { opt::is_help_option; }) {
                 invoked = true;
-                dispatch_option_with_arg<opt, false>("--help", help_message_raw.sv());
+                invoke_help_callback<opt>();
             }
         };
 
@@ -986,24 +1029,6 @@ private:
 
         /// Dispatch the error.
         has_error = not error_handler(std::move(msg));
-    }
-
-    /// Get the name of an option type.
-    template <typename t>
-    static consteval auto type_name() -> detail::static_string<25> {
-        detail::static_string<25> buffer;
-        if constexpr (detail::is<t, string>) buffer.append("string");
-        else if constexpr (detail::is<t, bool>) buffer.append("bool");
-        else if constexpr (detail::is<t, integer, double>) buffer.append("number");
-        else if constexpr (requires { t::is_file_data; }) buffer.append("file");
-        else if constexpr (detail::is_callback<t>) buffer.append("arg");
-        else if constexpr (detail::is_vector_v<t>) {
-            buffer.append(type_name<typename t::value_type>().data, type_name<typename t::value_type>().len);
-            buffer.append("s");
-        } else {
-            CLOPTS_ERR("Option type must be std::string, bool, integer, double, or void(*)(), or a vector thereof");
-        }
-        return buffer;
     }
 
     /// Helper to parse an integer or double.
@@ -1121,26 +1146,7 @@ private:
             /// If it’s a callable, call it.
             if constexpr (detail::is_callback<base_type>) {
                 /// The builtin help option is handled here. We pass the help message as an argument.
-                if constexpr (requires { opt::is_help_option; }) {
-                    /// New API: program name + help message [+ user data].
-                    using sv = std::string_view;
-                    if constexpr (requires { opt::help_callback(sv{}, help_message_raw.sv(), user_data); })
-                        opt::help_callback(sv{argv[0]}, help_message_raw.sv(), user_data);
-                    else if constexpr (requires { opt::help_callback(sv{}, help_message_raw.sv()); })
-                        opt::help_callback(sv{argv[0]}, help_message_raw.sv());
-
-                    /// Compatibility for callbacks that don’t take the program name.
-                    else if constexpr (requires { opt::help_callback(help_message_raw.sv(), user_data); })
-                        opt::help_callback(help_message_raw.sv(), user_data);
-                    else if constexpr (requires { opt::help_callback(help_message_raw.sv()); })
-                        opt::help_callback(help_message_raw.sv());
-
-                    /// Invalid help option callback.
-                    else static_assert(
-                        detail::always_false<opt>,
-                        "Invalid help option signature. Consult the README for more information"
-                    );
-                }
+                if constexpr (requires { opt::is_help_option; }) invoke_help_callback<opt>();
 
                 /// If it’s not the help option, just invoke it.
                 else { opt::callback(user_data, opt_str); }
