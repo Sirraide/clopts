@@ -21,7 +21,7 @@ using options = clopts< // clang-format off
     positional<"foobar", "Foobar description goes here", std::string, false>,
     option<"--size", "Size of something goes here", int64_t>,
     multiple<option<"--int", "Integers", int64_t, true>>,
-    option<"--lang", "Language option", values<1, 27, 42, 58>>,
+    option<"--lang", "Language option", values<0, 27, 42, 58>>,
     flag<"--frobnicate", "Whether to frobnicate">,
     func<"--func", "Print 42 and exit", print_number_and_exit>,
     help<custom_help>

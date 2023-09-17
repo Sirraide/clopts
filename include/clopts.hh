@@ -83,6 +83,12 @@ constexpr inline int CLOPTS_STRCMP(const char* a, const char* b) {
 
 /// Constexpr to_string for integers. Returns the number of bytes written.
 constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
+    /// Special handling for 0.
+    if (i == 0) {
+        *out = '0';
+        return 1;
+    }
+
     const auto start = out;
     if (i < 0) {
         *out++ = '-';
