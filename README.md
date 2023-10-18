@@ -47,9 +47,9 @@ using options = clopts< // clang-format off
 
 int main(int argc, char** argv) {
     int number = 42;
-    options::parse(argc, argv, &number);
+    auto opts = options::parse(argc, argv, nullptr, &number);
 
-    auto ints = options::get<"--int">();
+    auto ints = opts.get<"--int">();
     if (ints->empty()) std::cout << "No ints!\n";
     else for (const auto& i : *ints) std::cout << i << "\n";
 }
@@ -75,9 +75,10 @@ clopts<
 The vast majority of types defined by this library are *not* meant to be instantiated.
 
 At runtime, the options are parsed by calling the `parse()` function of
-your `clopts` type, passing it `argc` and `argv`. Note: At the moment, this means that option values are global and that options can only be parsed once. I have yet to encounter a use for parsing command line options multiple times during the runtime of a single program, but support for that may be added in a future release.
+your `clopts` type, passing it `argc` and `argv`. This function returns an
+object containing the parsed option values.
 ```c++
-options::parse(argc, argv);
+auto opts = options::parse(argc, argv);
 ```
 
 For a detailed description of all the option types, see the `Option Types`
@@ -88,8 +89,8 @@ The `get<>()` function returns a pointer to an option value, or nullptr if
 the option is not found, unless the option is a `multiple` option (see below). 
 If the option is a `flag` (see below), it instead returns a `true` if the option was found, and `false` if it wasn’t.
 ```c++
-options::parse(argc, argv);
-if (auto* size = options::get<"--size">()) {
+auto opts = options::parse(argc, argv);
+if (auto* size = opts.get<"--size">()) {
     /// Do something.
 }
 ```
@@ -102,10 +103,10 @@ if the option wasn’t found. Note that this function creates a copy of the opti
 overhead if the option value happens to be a large string. If `value` is returned, it is first `static_cast` to
 the option type.
 ```c++
-options::parse(argc, argv);
+auto opts = options::parse(argc, argv);
 
 /// Default size is 10.
-std::cout << "Size: " << options::get_or<"--size">(10) << "\n";
+std::cout << "Size: " << opts.get_or<"--size">(10) << "\n";
 ```
 
 ### Error Handling
@@ -114,21 +115,27 @@ errors that would make the options unparseable or ill-formed, such as having
 two different options with the same name, or trying to call `get<>()` on an
 option that doesn't exist, are compile-time errors.
 
-When an error is encountered (such as an unrecognised option name or if an option that is marked as required was not specified), the parser invokes your `clopts` type's error
+When an error is encountered (such as an unrecognised option name or if an option that is marked as 
+required was not specified), the parser invokes your `clopts` type's error
 handler, which, by default, prints the error, the help message, and then
 exits the program with code `1`.
 
-You can change this behaviour by installing your own error handler:
+You can change this behaviour by passing an error handler to the `parse()`
+function.
 ```c++
-options::handle_error = [&](std::string&& errmsg) {
-    std::cerr << "PANIC!";
-    return false;
-};
+static bool error_handler(std::string&& error) {
+    throw std::runtime_error(error);
+}
+
+auto opts = options::parse(argc, argv, error_handler);
 ```
 
 The error handler must return a bool which tells the parser whether it
 should continue the parsing process: `true` means continue, `false` means
 abort (that is, the parsing process, not the entire program).
+
+If you pass `nullptr` as the error handler, the default error handler is
+used.
 
 ## Option types
 This library comes with several builtin option types that are meant to
@@ -144,7 +151,7 @@ using options = clopts<
     option<"--size", "The size of the file", int64_t>,
     positional<"foobar", "Description goes here">,
     flag<"--test", "Test flag">,
->;        
+>;
 ```
 
 The options themselves are also templates. What parameters they take depends
@@ -196,10 +203,10 @@ If the values are strings, `get<>` will return a `std::string`; if the values ar
 Both `--option value` and `--option=value` are recognised by the parser.
 
 ### Option Type: `flag`
-Flags have no argument. For flags, `get<>()` returns a `bool` that is `true` when they're present, and `false` otherwise.
+Flags have no argument. For flags, `get<>()` returns a `bool` that is `true` when they're present, 
+and `false` otherwise. Flags are never required as that wouldn’t make much sense.
 ```c++
 flag<"--name", "Description">
-flag<"--name", "Description", /* required? */ false>
 ```
 
 ### Option Type: `positional`
@@ -274,7 +281,8 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 A `func` defines a callback that is called by the parser when the
 option is encountered. You can specify additional data to be passed
 to the callback in the form of a `void*`; this pointer is passed as
-the optional third parameter to the `parse()` function.
+the optional fourth parameter to the `parse()` function (recall that
+the third parameter is the error handler).
 
 Furthermore, if the specified function takes a `std::string_view`, the option now takes a value, and the parser
 will pass the option value to the callback, and if the function
@@ -301,7 +309,7 @@ using options = clopts<
 
 int main(int argc, char** argv) {
     int x = 42;
-    options::parse(argc, argv, &x);
+    options::parse(argc, argv, nullptr, &x);
 }
 ```
 

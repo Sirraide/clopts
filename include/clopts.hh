@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -511,7 +512,7 @@ static file_data_type map_file(
 
     /// Construct the file data.
     file_data_type dat;
-    dat.path = path;
+    dat.path = typename file_data_type::path_type{path.begin(), path.end()};
     dat.contents = std::move(ret);
     return dat;
 }
@@ -554,16 +555,17 @@ struct short_option : detail::opt_impl<_name, _description, _type, required> {
 } // namespace experimental
 
 /// A file.
-template <typename contents_type_t = std::string>
+template <typename contents_type_t = std::string, typename path_type_t = std::filesystem::path>
 struct file {
     using contents_type = contents_type_t;
+    using path_type = path_type_t;
     using element_type = typename contents_type::value_type;
     using element_pointer = std::add_pointer_t<element_type>;
     static constexpr bool is_file_data = true;
 
 public:
     /// The file path.
-    std::filesystem::path path;
+    path_type path;
 
     /// The contents of the file.
     contents_type contents;
@@ -601,11 +603,12 @@ template <
 struct func : func_impl<_name, _description, detail::make_lambda<cb>, required> {};
 
 /// A flag option.
+///
+/// Flags are never required because that wouldn’t make much sense.
 template <
     detail::static_string _name,
-    detail::static_string _description = "",
-    bool required = false>
-struct flag : option<_name, _description, bool, required> {};
+    detail::static_string _description = "">
+struct flag : option<_name, _description, bool, false> {};
 
 /// The help option.
 template <auto _help_cb = detail::default_help_handler>
@@ -633,9 +636,11 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
 /// ===========================================================================
 template <typename... opts>
 class clopts {
-    /// This should never be instantiated.
-    constexpr clopts() = delete;
-    constexpr ~clopts() = delete;
+    using This = clopts<opts...>;
+
+    /// This should never be instantiated by the user.
+    explicit clopts() {}
+    ~clopts() {}
     clopts(const clopts& o) = delete;
     clopts(clopts&& o) = delete;
     clopts& operator=(const clopts& o) = delete;
@@ -698,20 +703,13 @@ class clopts {
 
     /// Various types.
     using help_string_t = detail::static_string<1024 * sizeof...(opts)>;
+    using optvals_tuple_t = std::tuple<typename opts::type...>;
     using string = std::string;
     using integer = int64_t;
 
-    /// Variables for the parser and for storing parsed options.
-    static inline bool has_error;
-    static inline int argc;
-    static inline int argi;
-    static inline char** argv;
-    static inline void* user_data;
-    static inline std::tuple<typename opts::type...> optvals;
-    static inline std::array<bool, sizeof...(opts)> opts_found{};
-    static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.data...};
-    static inline bool opts_parsed{};
-
+public:
+    using error_handler_t = std::function<bool(std::string&&)>;
+private:
     /// Get the name of an option type.
     template <typename t>
     static consteval auto type_name() -> detail::static_string<25> {
@@ -746,18 +744,101 @@ class clopts {
         return sz;
     }
 
+    /// Get the type of an option value.
+    template <detail::static_string s>
+    using optval_t = std::remove_cvref_t<decltype(std::get<optindex<s>()>(std::declval<optvals_tuple_t>()))>;
+
+public:
+    /// Result type.
+    class optvals_type {
+        friend clopts;
+        optvals_tuple_t optvals{};
+        std::array<bool, sizeof...(opts)> opts_found{};
+
+        /// This implements get<>() and get_or<>().
+        template <detail::static_string s>
+        constexpr auto get_impl() -> std::conditional_t<std::is_same_v<optval_t<s>, bool>, bool, optval_t<s>*> {
+            using value_type = optval_t<s>;
+
+            /// Bool options don’t have a value. Instead, we just return whether the option was found.
+            if constexpr (std::is_same_v<value_type, bool>) return opts_found[optindex<s>()];
+
+            /// We always return a pointer to vector options because the user can just check if it’s empty.
+            else if constexpr (detail::is_vector_v<value_type>) return std::addressof(std::get<optindex<s>()>(optvals));
+
+            /// Function options don’t have a value.
+            else if constexpr (detail::is_callback<value_type>) CLOPTS_ERR("Cannot call get<>() on an option with function type.");
+
+            /// Otherwise, return nullptr if the option wasn’t found, and a pointer to the value otherwise.
+            else return not opts_found[optindex<s>()] ? nullptr : std::addressof(std::get<optindex<s>()>(optvals));
+        }
+
+    public:
+        /// \brief Get the value of an option.
+        ///
+        /// This is not \c [[nodiscard]] because that raises an ICE when compiling
+        /// with some older versions of GCC.
+        ///
+        /// \return \c true / \c false if the option is a flag
+        /// \return \c nullptr if the option was not found
+        /// \return a pointer to the value if the option was found
+        ///
+        /// \see get_or()
+        template <detail::static_string s>
+        constexpr auto get() {
+            /// Check if the option exists before calling get_impl<>() so we trigger the static_assert
+            /// below before hitting a complex template instantiation error.
+            constexpr auto sz = optindex_impl<0, s>();
+            if constexpr (sz < sizeof...(opts)) return get_impl<s>();
+            else static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
+        }
+
+        /// \brief Get the value of an option or a default value if the option was not found.
+        ///
+        /// The default value is \c static_cast to the type of the option value.
+        ///
+        /// \param default_ The default value to return if the option was not found.
+        /// \return \c default_ if the option was not found.
+        /// \return a copy of the option value if the option was found.
+        ///
+        /// \see get()
+        template <detail::static_string s>
+        constexpr auto get_or(auto default_) {
+            constexpr auto sz = optindex_impl<0, s>();
+            if constexpr (sz < sizeof...(opts)) {
+                if (opts_found[optindex<s>()]) return *get_impl<s>();
+                else return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(default_);
+            } else {
+                static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
+            }
+        }
+    };
+
+private:
+    /// Option names.
+    static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.data...};
+
+    /// Variables for the parser and for storing parsed options.
+    optvals_type optvals{};
+    bool has_error = false;
+    int argc{};
+    int argi{};
+    const char** argv{};
+    void* user_data{};
+    error_handler_t error_handler{};
+
     /// Check if an option was found.
     template <detail::static_string option>
-    static constexpr bool found() { return opts_found[optindex<option>()]; }
+    bool found() { return optvals.opts_found[optindex<option>()]; }
 
     /// Mark an option as found.
     template <detail::static_string option>
-    static constexpr void set_found() { opts_found[optindex<option>()] = true; }
+    void set_found() { optvals.opts_found[optindex<option>()] = true; }
 
     /// Get a reference to an option value.
     template <detail::static_string s>
-    [[nodiscard]] static constexpr auto ref() -> decltype(std::get<optindex<s>()>(optvals))& {
-        using value_type = decltype(std::get<optindex<s>()>(optvals));
+    [[nodiscard]] constexpr auto ref() -> decltype(std::get<optindex<s>()>(optvals.optvals))& {
+        using value_type = decltype(std::get<optindex<s>()>(optvals.optvals));
 
         /// Bool options don’t have a value.
         if constexpr (std::is_same_v<value_type, bool>) CLOPTS_ERR("Cannot call ref() on an option<bool>");
@@ -766,72 +847,9 @@ class clopts {
         else if constexpr (detail::is_callback<value_type>) CLOPTS_ERR("Cannot call ref<>() on an option with function type.");
 
         /// Get the option value.
-        else return std::get<optindex<s>()>(optvals);
+        else return std::get<optindex<s>()>(optvals.optvals);
     }
 
-    /// Get the type of an option value.
-    template <detail::static_string s>
-    using optval_t = std::remove_cvref_t<decltype(std::get<optindex<s>()>(optvals))>;
-
-    /// This implements get<>() and get_or<>().
-    template <detail::static_string s>
-    static constexpr auto get_impl() -> std::conditional_t<std::is_same_v<optval_t<s>, bool>, bool, optval_t<s>*> {
-        using value_type = optval_t<s>;
-
-        /// Bool options don’t have a value. Instead, we just return whether the option was found.
-        if constexpr (std::is_same_v<value_type, bool>) return opts_found[optindex<s>()];
-
-        /// We always return a pointer to vector options because the user can just check if it’s empty.
-        else if constexpr (detail::is_vector_v<value_type>) return std::addressof(std::get<optindex<s>()>(optvals));
-
-        /// Function options don’t have a value.
-        else if constexpr (detail::is_callback<value_type>) CLOPTS_ERR("Cannot call get<>() on an option with function type.");
-
-        /// Otherwise, return nullptr if the option wasn’t found, and a pointer to the value otherwise.
-        else return not opts_found[optindex<s>()] ? nullptr : std::addressof(std::get<optindex<s>()>(optvals));
-    }
-
-public:
-    /// \brief Get the value of an option.
-    ///
-    /// This is not \c [[nodiscard]] because that raises an ICE when compiling
-    /// with some older versions of GCC.
-    ///
-    /// \return \c true / \c false if the option is a flag
-    /// \return \c nullptr if the option was not found
-    /// \return a pointer to the value if the option was found
-    ///
-    /// \see get_or()
-    template <detail::static_string s>
-    static constexpr auto get() {
-        /// Check if the option exists before calling get_impl<>() so we trigger the static_assert
-        /// below before hitting a complex template instantiation error.
-        constexpr auto sz = optindex_impl<0, s>();
-        if constexpr (sz < sizeof...(opts)) return get_impl<s>();
-        else static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
-    }
-
-    /// \brief Get the value of an option or a default value if the option was not found.
-    ///
-    /// The default value is \c static_cast to the type of the option value.
-    ///
-    /// \param default_ The default value to return if the option was not found.
-    /// \return \c default_ if the option was not found.
-    /// \return a copy of the option value if the option was found.
-    ///
-    /// \see get()
-    template <detail::static_string s>
-    static constexpr auto get_or(auto default_) {
-        constexpr auto sz = optindex_impl<0, s>();
-        if constexpr (sz < sizeof...(opts)) {
-            if (!opts_found[optindex<s>()]) return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(default_);
-            return *get_impl<s>();
-        } else {
-            static_assert(sz < sizeof...(opts), "Invalid option name. You've probably misspelt an option.");
-        }
-    }
-
-private:
     /// Create the help message.
     static constexpr auto make_help_message() -> help_string_t { // clang-format off
         help_string_t msg{};
@@ -933,17 +951,13 @@ private:
 public:
     /// Get the help message.
     static auto help() -> std::string {
-        std::string msg = "Usage: ";
-        msg += argv[0];
-        msg += " ";
-        msg.append(help_message_raw.data, help_message_raw.len);
-        return msg;
+        return {help_message_raw.data, help_message_raw.len};
     }
 
 private:
     /// Handle an option value.
     template <typename opt, bool is_multiple>
-    static auto dispatch_option_with_arg(std::string_view opt_str, std::string_view opt_val) {
+    auto dispatch_option_with_arg(std::string_view opt_str, std::string_view opt_val) {
         using opt_type = typename opt::type;
 
         /// Mark the option as found.
@@ -982,7 +996,7 @@ private:
 
     /// Invoke the help callback of the help option.
     template <typename opt>
-    static void invoke_help_callback() {
+    void invoke_help_callback() {
         /// New API: program name + help message [+ user data].
         using sv = std::string_view;
         if constexpr (requires { opt::help_callback(sv{}, sv{}, user_data); })
@@ -1003,11 +1017,8 @@ private:
         );
     }
 
-    /// This callback is called whenever an error occurs during parsing.
-    ///
-    /// \param errmsg An error message that describes what went wrong.
-    /// \return `true` if the parsing process should continue, and `false` otherwise.
-    static inline std::function<bool(std::string&&)> error_handler = [](std::string&& errmsg) -> bool {
+    /// Error handler that is used if the user doesn’t provide one.
+    bool default_error_handler(std::string&& errmsg) {
         std::cerr << argv[0] << ": " << errmsg << "\n";
 
         /// Invoke the help option.
@@ -1028,7 +1039,7 @@ private:
     };
 
     /// Invoke the error handler and set the error flag.
-    static void handle_error(auto first, auto&&... msg_parts) {
+    void handle_error(auto first, auto&&... msg_parts) {
         /// Append the message parts.
         std::string msg = std::string{std::move(first)};
         ((msg += std::forward<decltype(msg_parts)>(msg_parts)), ...);
@@ -1039,19 +1050,27 @@ private:
 
     /// Helper to parse an integer or double.
     template <typename number_type, detail::static_string name>
-    static auto parse_number(std::string_view s, auto parse_func) -> number_type {
-        char* pos{};
-        errno = 0;
+    auto parse_number(std::string_view s, auto parse_func) -> number_type {
         number_type i{};
+
+        /// The empty string is a valid integer *and* float, apparently.
+        if (s.empty()) {
+            handle_error("Expected ", name.sv(), ", got empty string");
+            return i;
+        }
+
+        /// Parse the number.
+        errno = 0;
+        char* pos{};
         if constexpr (requires { parse_func(s.data(), &pos, 10); }) i = number_type(parse_func(s.data(), &pos, 10));
         else i = number_type(parse_func(s.data(), &pos));
-        if (errno == ERANGE or pos != s.data() + s.size()) handle_error(s, " does not appear to be a valid ", name.sv());
+        if (errno != 0 or *pos) handle_error(s, " does not appear to be a valid ", name.sv());
         return i;
     }
 
     /// Parse an option value.
     template <typename type>
-    static detail::base_type_t<type> make_arg(std::string_view opt_val) {
+    detail::base_type_t<type> make_arg(std::string_view opt_val) {
         using base_type = detail::base_type_t<type>;
 
         /// Make sure this option takes an argument.
@@ -1076,7 +1095,7 @@ private:
     /// Both --option value and --option=value are valid ways of supplying a
     /// value. We test for both of them.
     template <typename opt, bool is_multiple>
-    static bool handle_opt_with_arg(std::string_view opt_str) {
+    bool handle_opt_with_arg(std::string_view opt_str) {
         using opt_type = typename opt::type;
 
         /// --option=value or short opt.
@@ -1121,7 +1140,7 @@ private:
 
     /// Handle an option. The parser calls this on each non-positional option.
     template <typename opt>
-    static bool handle_regular_impl(std::string_view opt_str) {
+    bool handle_regular_impl(std::string_view opt_str) {
         /// If the supplied string doesn’t start with the option name, move on to the next option
         if (not opt_str.starts_with(opt::name.sv())) return false;
 
@@ -1169,7 +1188,7 @@ private:
 #undef INVOKE
 
     template <typename opt>
-    static bool handle_positional_impl(std::string_view opt_str) {
+    bool handle_positional_impl(std::string_view opt_str) {
         /// If we've already encountered this positional option, then return.
         static constexpr bool is_multiple = requires { opt::is_multiple; };
         if constexpr (not is_multiple) {
@@ -1184,49 +1203,28 @@ private:
     }
 
     /// Invoke handle_regular_impl on every option until one returns true.
-    static bool handle_regular(std::string_view opt_str) {
-        static const auto handle = []<typename opt>(std::string_view str) {
+    bool handle_regular(std::string_view opt_str) {
+        const auto handle = [this]<typename opt>(std::string_view str) {
+            /// `this->` is to silence a warning.
             if constexpr (detail::is_positional_v<opt>) return false;
-            else return handle_regular_impl<opt>(str);
+            else return this->handle_regular_impl<opt>(str);
         };
 
         return (handle.template operator()<opts>(opt_str) or ...);
     };
 
     /// Invoke handle_positional_impl on every option until one returns true.
-    static bool handle_positional(std::string_view opt_str) {
-        static const auto handle = []<typename opt>(std::string_view str) {
-            if constexpr (detail::is_positional_v<opt>) return handle_positional_impl<opt>(str);
+    bool handle_positional(std::string_view opt_str) {
+        const auto handle = [this]<typename opt>(std::string_view str) {
+            /// `this->` is to silence a warning.
+            if constexpr (detail::is_positional_v<opt>) return this->handle_positional_impl<opt>(str);
             else return false;
         };
 
         return (handle.template operator()<opts>(opt_str) or ...);
     };
 
-public:
-    /// Parse command line options.
-    ///
-    /// \param _argc The argument count.
-    /// \param _argv The arguments.
-    /// \param _user_data User data passed to any func<> options that accept a `void*`.
-    static void parse(int _argc, char** _argv, void* _user_data = nullptr) {
-        /// Initialise state.
-        has_error = false;
-        argc = _argc;
-        argv = _argv;
-        user_data = _user_data;
-
-        /// This is to silence any dangling pointer warnings about retaining `user_data`.
-        detail::at_scope_exit<decltype([] { user_data = nullptr; })> guard;
-
-        /// Check that we haven’t already parsed options.
-        if (opts_parsed) {
-            handle_error("Cannot parse options twice");
-            return;
-        } else {
-            opts_parsed = true;
-        }
-
+    void parse() {
         /// Main parser loop.
         for (argi = 1; argi < argc; argi++) {
             std::string_view opt_str{argv[argi]};
@@ -1254,6 +1252,39 @@ public:
                 handle_error(std::move(errmsg));
             }
         });
+    }
+
+public:
+    /// Parse command line options.
+    ///
+    /// \param argc The argument count.
+    /// \param argv The arguments.
+    /// \param user_data User data passed to any func<> options that accept a `void*`.
+    /// \param error_handler A callback that is invoked whenever an error occurs. If
+    ///        nullptr is passed, the default error handler is used. The error handler
+    ///        should return \c true if parsing should continue and \c false otherwise.
+    /// \return The parsed option values.
+    static auto parse(
+        int argc,
+        const char* const* const argv,
+        std::function<bool(std::string&&)> error_handler = nullptr,
+        void* user_data = nullptr
+    ) -> optvals_type {
+        /// Initialise state.
+        This self;
+        if (error_handler) self.error_handler = error_handler;
+        else self.error_handler = [&](auto&& e) { return self.default_error_handler(std::forward<decltype(e)>(e)); };
+        self.argc = argc;
+        self.user_data = user_data;
+
+        /// Safe because we don’t attempt to modify argv anyway. This
+        /// is just so we can pass in both e.g. a `const char**` and a
+        /// `char **`.
+        self.argv = const_cast<const char**>(argv);
+
+        /// Parse the options.
+        self.parse();
+        return std::move(self.optvals);
     }
 };
 
