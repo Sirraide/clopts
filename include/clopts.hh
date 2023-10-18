@@ -1255,13 +1255,13 @@ private:
     }
 
 public:
-    /// Parse command line options.
+    /// \brief Parse command line options.
     ///
     /// \param argc The argument count.
-    /// \param argv The arguments.
-    /// \param user_data User data passed to any func<> options that accept a `void*`.
+    /// \param argv The arguments (including the program name).
+    /// \param user_data User data passed to any func\<\> options that accept a \c void*.
     /// \param error_handler A callback that is invoked whenever an error occurs. If
-    ///        nullptr is passed, the default error handler is used. The error handler
+    ///        \c nullptr is passed, the default error handler is used. The error handler
     ///        should return \c true if parsing should continue and \c false otherwise.
     /// \return The parsed option values.
     static auto parse(

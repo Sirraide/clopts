@@ -179,7 +179,8 @@ option<"--name", "Description", std::string, /* required? */ false>
   The default is `false`.
 
 #### **Types and Arguments**
-The `option` type always takes an argument. (Note: strictly speaking, this is not exactly true as `option` is the base class of most other option types, but users of the library should only use `option<>` with the data types listed above).
+The `option` type always takes an argument. Both `--option value` and `--option=value` are recognised by the parser.
+(Note: strictly speaking, this is not exactly true as `option` is the base class of most other option types, but users of the library should only use `option<>` with the data types listed here).
 
 Supported types for the 3rd template parameter are:
 - `std::string`: Any string.
@@ -188,9 +189,13 @@ Supported types for the 3rd template parameter are:
 - `double`: A valid floating point number (as per `std::strtod`).
 - `values<>`: See below.
 
-The `file<>` type indicates that the argument should be treated as a path to a file, the contents of which will be loaded into memory at parse time (note: lazy loading is *not* supported). When accessed with `get<>()`, both the path and contents will be returned. If the parser can't load the file (for instance, because it doesn't exist), it will invoke the error handler with an appropriate message, and the option value is left in an indeterminate state. The template argument is the type to use for the file
-contents. The default is `std::string`.
+##### Type: `file<>`
+The `file<>` type indicates that the argument should be treated as a path to a file, the contents of which will be loaded into memory at parse time (note: lazy loading is *not* supported). When accessed with `get<>()`, both the path and contents will be returned. If the parser can't load the file (for instance, because it doesn't exist), it will invoke the error handler with an appropriate message, and the option value is left in an indeterminate state. The template arguments are the type to use for the file
+contents and path, respectively; the default is `std::string` and `std::filesystem::path`, but you can also use a `std::string` 
+or `std::vector<char>` for either. Other types that have a constructor that takes a `begin()/end()` pair of `char` iterators 
+should also work.
 
+##### Type: `values<>`
 The `values<>` type is used to indicate a set of valid values. The values must
 either all be strings or all be integers (doubles are currently not allowed to avoid the usual problems associated with comparing floating-point numbers for equality). For example, possible values for a `values<>` option are:
 ```c++
@@ -200,7 +205,6 @@ values<"foo", "bar", "baz">
 
 If the values are strings, `get<>` will return a `std::string`; if the values are integers, `get<>` will return an `int64_t`.
 
-Both `--option value` and `--option=value` are recognised by the parser.
 
 ### Option Type: `flag`
 Flags have no argument. For flags, `get<>()` returns a `bool` that is `true` when they're present, 
