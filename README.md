@@ -18,12 +18,50 @@ to missing C++20 support or GCC segfaulting.
 This library works on Linux and Windows, but is mainly tested on Linux.
 
 ## Building
-You only need to `#include <clopts.hh>` and then you're good to go. There is no build step as this is a header-only library. The `test` directory contains a test file you can experiment with, but it isn’t part of the main library.
+You only need to `#include <clopts.hh>` and then you're good to go. There is no build step as this is a header-only library. The `test` directory 
+contains some tests that you can build if you want to, but they’re not part of the main library.
 
 ## Usage
 ### Example
-The following is a simple self-contained program that shows how to use this 
+The following is a simple, self-contained program that shows how to use this 
 library:
+```c++
+#include <clopts.hh>
+
+using namespace command_line_options;
+using options = clopts<
+    option<"--repeat", "How many times the output should be repeated (default 1)", int64_t>,
+    positional<"file", "The file whose contents should be printed", file<>, /*required=*/true>,
+    help<>
+>;
+
+int main(int argc, char** argv) {
+    auto opts = options::parse(argc, argv);
+
+    auto& file_contents = opts.get<"file">()->contents;
+    auto repeat_count = opts.get_or<"--repeat">(1);
+
+    for (std::int64_t i = 0; i < repeat_count; i++)
+        std::cout << file_contents;
+}
+```
+
+The program can then be called as follows:
+```bash
+# Print the contents of file.txt 15 times in total.
+$ ./program file.txt
+$ ./program --repeat 4 file.txt
+$ ./program file.txt --repeat=10
+
+# Print an auto-generated help message.
+$ ./program --help
+Usage: ./program <file> [options]
+Options:
+    --repeat <number>  How many times the output should be repeated (default 0)
+    --help             Print this help information
+```
+
+Here’s another, more complicated example if you want to see more of the features of this library:
 ```c++
 #include <clopts.hh>
 using namespace command_line_options;
@@ -34,16 +72,16 @@ static void print_number_and_exit(void* arg, std::string_view) {
     std::exit(0);
 }
 
-using options = clopts< // clang-format off
+using options = clopts<
     positional<"file", "The name of the file", file<std::vector<std::byte>>, true>,
-    positional<"foobar", "Foobar description goes here", std::string, false>,
-    option<"--size", "Size of something goes here", int64_t>,
+    positional<"foobar", "[description goes here]", std::string, false>,
+    option<"--size", "The size parameter (whatever that means)", int64_t>,
     multiple<option<"--int", "Integers", int64_t, true>>,
     flag<"--test", "Test flag">,
-    option<"--prime", "A prime number", values<2, 3, 5, 7, 11, 13>>,
+    option<"--prime", "A prime number that is less than 14", values<2, 3, 5, 7, 11, 13>>,
     func<"--func", "Print 42 and exit", print_number_and_exit>,
     help<>
->; // clang-format on
+>;
 
 int main(int argc, char** argv) {
     int number = 42;
