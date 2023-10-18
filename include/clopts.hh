@@ -447,7 +447,7 @@ struct opt_impl {
 
 /// Default help handler.
 inline void default_help_handler(std::string_view program_name, std::string_view msg) {
-    std::cerr << program_name << " " << msg;
+    std::cerr << "Usage: " << program_name << " " << msg;
     std::exit(0);
 }
 
@@ -1034,7 +1034,7 @@ private:
         (invoke.template operator()<opts>(), ...);
 
         /// If no help option was found, print the help message.
-        if (not invoked) std::cerr << help();
+        if (not invoked) std::cerr << "Usage: " << argv[0] << " " << help();
         std::exit(1);
     };
 
