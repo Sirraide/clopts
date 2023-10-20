@@ -1,3 +1,9 @@
 .idea/
 test/out/
 test/tests
+
+# Windows stuff
+.vs/
+*.exe
+*.ilk
+*.pdb

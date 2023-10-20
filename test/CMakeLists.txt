@@ -15,17 +15,22 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(tests test.cc ../include/clopts.hh)
 
-target_compile_options(tests PRIVATE -Wall -Wextra -Werror)
-target_compile_options(tests PRIVATE
-    $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -rdynamic -fsanitize=address>
-    $<$<CONFIG:RELEASE>:-O3 -march=native>
-)
-target_link_options(tests PRIVATE
-    $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -rdynamic -fsanitize=address>
-    $<$<CONFIG:RELEASE>:-O3 -march=native>
-)
+if (NOT MSVC)
+    target_compile_options(tests PRIVATE
+        -Wall -Wextra -Werror
+        $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -rdynamic -fsanitize=address>
+        $<$<CONFIG:RELEASE>:-O3 -march=native>
+    )
+    target_link_options(tests PRIVATE
+        $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -rdynamic -fsanitize=address>
+        $<$<CONFIG:RELEASE>:-O3 -march=native>
+    )
+endif()
 
-target_link_libraries(tests PRIVATE Catch2::Catch2WithMain m)
+if (NOT WIN32)
+    target_link_libraries(tests PRIVATE m)
+endif()
+target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
 set_target_properties(tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
