@@ -387,7 +387,8 @@ TEST_CASE("File option can map a file properly") {
     run.template operator()<file<std::string, std::vector<char>>>();
 }
 
-/*TEST_CASE("Aliased options are equivalent") {
+
+TEST_CASE("Aliased options are equivalent") {
     using options = clopts<
         multiple<option<"--string", "A string", std::string>>,
         aliases<"-s", "--string">
@@ -406,7 +407,8 @@ TEST_CASE("File option can map a file properly") {
     REQUIRE(opts.get<"-s">()->size() == 2);
     CHECK(opts.get<"-s">()->at(0) == "123");
     CHECK(opts.get<"-s">()->at(1) == "456");
-}*/
+}
+
 
 /// TODO:
 ///  - alias<"-f", "--filename">; alternatively: option<names<"-f", "--filename">, "description">

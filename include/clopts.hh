@@ -298,8 +298,7 @@ struct string_or_int {
     }
 
     constexpr string_or_int(std::int64_t integer)
-        : integer{integer}
-        , is_integer{true} {}
+        : integer{integer}, is_integer{true} {}
 };
 
 string_or_int(std::int64_t) -> string_or_int<1>;
@@ -440,6 +439,17 @@ struct opt_impl {
     constexpr opt_impl() = delete;
 };
 
+/// Alias declaration.
+template <static_string... _names>
+struct aliases {};
+
+/// A single alias.
+template <static_string alias_name_, static_string opt_name_>
+struct alias {
+    static constexpr inline decltype(alias_name_) alias_name = alias_name_;
+    static constexpr inline decltype(opt_name_) opt_name = opt_name_;
+};
+
 /// Default help handler.
 inline void default_help_handler(std::string_view program_name, std::string_view msg) {
     std::cerr << "Usage: " << program_name << " " << msg;
@@ -535,12 +545,74 @@ constexpr void While(bool& cond, auto&& lambda) {
     (impl.template operator()<pack>() and ...);
 }
 
+// clang-format off
+/// ===========================================================================
+///  Preprocessing.
+/// ===========================================================================
+/// Greenspun’s tenth rule in action.
+template <typename...> struct list;
+template <typename a, typename b> struct concat_impl;
+
+template <typename... as, typename... bs>
+struct concat_impl<list<as...>, list<bs...>> {
+    using type = list<as..., bs...>;
+};
+
+template <typename... ts>
+using concat = typename concat_impl<ts...>::type;
+
+/// By default, no processing is required.
+template <typename ty>
+struct process {
+    using types = list<ty>;
+    using extra = list<>;
+};
+
+/// Expand `aliases<>` options.
+template <static_string alias_name, static_string opt_name, static_string...rest>
+struct process<aliases<alias_name, opt_name, rest...>> {
+    using types = list<>;
+    using extra = concat<list<alias<alias_name, opt_name>>, typename process<aliases<rest...>>::extra>;
+};
+
+template <typename first, typename... rest>
+struct preprocessed_impl;
+
+/// Process an element.
+///
+/// \tparam processed Elements that have already been processed.
+/// \tparam first The next element to be processed.
+/// \tparam rest The remaining elements to be processed.
+template <typename... processed, typename first, typename... rest>
+struct preprocessed_impl<list<processed...>, list<first, rest...>> {
+    using types = preprocessed_impl<
+        concat<list<processed...>, typename process<first>::types>,
+        list<rest...>
+    >;
+
+    using types = typename preprocessed::types;
+    using aliases = typename preprocessed::aliases;
+};
+
+/// Done processing everything.
+template <typename... processed>
+struct preprocessed_impl<list<processed...>, list<>> {
+    using type = list<processed...>;
+};
+
+template <typename... raw_opts>
+using preprocessed = typename preprocessed_impl<list<>, list<>, list<raw_opts...>>::type;
+// clang-format on
+
 /// ===========================================================================
 ///  Main implementation.
 /// ===========================================================================
-template <typename... opts>
-class clopts_impl {
-    using This = clopts_impl<opts...>;
+template <typename opts, typename extra>
+class clopts_impl;
+
+template <typename... opts, typename ...extra>
+class clopts_impl<list<opts...>, list<extra...>> {
+    using This = clopts_impl<list<opts...>, list<extra...>>;
 
     /// This should never be instantiated by the user.
     explicit clopts_impl() {}
@@ -609,7 +681,7 @@ class clopts_impl {
     static_assert(validate_multiple() <= 1, "Cannot have more than one multiple<positional<>> option");
 
     /// Various types.
-    using help_string_t = detail::static_string<1024 * sizeof...(opts)>;
+    using help_string_t = detail::static_string<1'024 * sizeof...(opts)>;
     using optvals_tuple_t = std::tuple<typename opts::type...>;
     using string = std::string;
     using integer = int64_t;
@@ -647,7 +719,7 @@ private:
         else return optindex_impl<index + 1, option>();
     }
 
-#if __cpp_static_assert >= 202306L
+#if __cpp_static_assert >= 202'306L
     template <detail::static_string option>
     static consteval auto format_invalid_option_name() -> detail::static_string<option.size() + 45> {
         detail::static_string<option.size() + 45> ret;
@@ -660,7 +732,7 @@ private:
 
     template <bool ok, detail::static_string option>
     static consteval void assert_valid_option_name() {
-#if __cpp_static_assert >= 202306L
+#if __cpp_static_assert >= 202'306L
         static_assert(ok, format_invalid_option_name<option>());
 #else
         static_assert(ok, "Invalid option name. You've probably misspelt an option.");
@@ -1226,7 +1298,7 @@ public:
 /// ===========================================================================
 /// Main command-line options type.
 template <typename... opts>
-using clopts = detail::clopts_impl<opts...>;
+using clopts = detail::clopts_impl<detail::preprocessed<opts...>>;
 
 /// Values for an option.
 using detail::values;
@@ -1335,12 +1407,7 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
     using is_positional_ = detail::positional_t<opt>;
 };
 
-/// Alias declaration.
-template <detail::static_string... _names>
-struct aliases : option<"_", "_", detail::noop_tag, false> {
-    static constexpr std::tuple names = {_names...};
-    static constexpr inline bool is_aliases = true;
-};
+using detail::aliases;
 
 } // namespace command_line_options
 
