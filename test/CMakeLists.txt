@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 project(clopts VERSION 2.0.0)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26)
 
 Include(FetchContent)
 
@@ -18,7 +18,7 @@ add_executable(tests test.cc ../include/clopts.hh)
 if (NOT MSVC)
     target_compile_options(tests PRIVATE
         -Wall -Wextra -Werror
-        $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -rdynamic -fsanitize=address>
+        $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -fsanitize=address>
         $<$<CONFIG:RELEASE>:-O3 -march=native>
     )
     target_link_options(tests PRIVATE
