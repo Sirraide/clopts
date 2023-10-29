@@ -63,24 +63,10 @@ constexpr inline int CLOPTS_STRCMP(const char* a, const char* b) {
 #    define CLOPTS_STRCMP(a, b) ::command_line_options::detail::CLOPTS_STRCMP(a, b)
 #endif
 
-/// \brief Helper to facilitate iteration over a parameter pack.
-///
-/// Use with caution because it can raise an ICE when compiling with recent versions of GCC.
-///
-/// This loops over \c pack, so long as \c cond is true, making each element of
-/// the pack accessible under the name \c name. Use \c return \c true to \c continue
-/// and \c return \c false to \c break.
-#define CLOPTS_LOOP(name, pack, cond, ...) \
-    ([&] <typename name> () -> bool { if (cond) { __VA_ARGS__ return true; } return false; }.template operator() <pack> () and ...)
-
 /// Raise a compile-time error.
 #ifndef CLOPTS_ERR
 #    define CLOPTS_ERR(msg) [] <bool _x = false> { static_assert(_x, msg); } ()
 #endif
-
-/// `if constexpr`, but as an expression.
-/// Use with caution because it can raise an ICE when compiling with recent versions of GCC.
-#define CLOPTS_COND(cond, t, f) [&]<bool _x = cond>() { if constexpr (_x) return t; else return f; } ()
 
 /// Constexpr to_string for integers. Returns the number of bytes written.
 constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
@@ -532,7 +518,7 @@ static file_data_type map_file(
 /// Iterate over a pack while a condition is true.
 template <typename... pack>
 constexpr void Foreach(auto&& lambda) {
-    (lambda.template operator()<pack>(),  ...);
+    (lambda.template operator()<pack>(), ...);
 }
 
 /// Iterate over a pack while a condition is true.
@@ -674,11 +660,11 @@ private:
 
     template <bool ok, detail::static_string option>
     static consteval void assert_valid_option_name() {
-    #if __cpp_static_assert >= 202306L
-            static_assert(ok, format_invalid_option_name<option>());
-    #else
-            static_assert(ok, "Invalid option name. You've probably misspelt an option.");
-    #endif
+#if __cpp_static_assert >= 202306L
+        static_assert(ok, format_invalid_option_name<option>());
+#else
+        static_assert(ok, "Invalid option name. You've probably misspelt an option.");
+#endif
     }
 
     /// Get the index of an option and raise an error if the option is not found.
@@ -800,7 +786,7 @@ private:
         help_string_t msg{};
 
         /// Append the positional options.
-        CLOPTS_LOOP(opt, opts, true, {
+        Foreach<opts...>([&]<typename opt> () {
             if constexpr (detail::is_positional_v<opt>) {
                 msg.append("<");
                 msg.append(opt::name.arr, opt::name.len);
@@ -1188,7 +1174,7 @@ private:
         }
 
         /// Make sure all required options were found.
-        CLOPTS_LOOP(opt, opts, true, {
+        Foreach<opts...>([&]<typename opt>() {
             if (not found<opt::name>() and opt::is_required) {
                 std::string errmsg;
                 errmsg += "Option \"";
@@ -1361,6 +1347,4 @@ struct aliases : option<"_", "_", detail::noop_tag, false> {
 #undef CLOPTS_STRLEN
 #undef CLOPTS_STRCMP
 #undef CLOPTS_ERR
-#undef CLOPTS_COND
-#undef CLOPTS_LOOP
 #endif // CLOPTS_H
