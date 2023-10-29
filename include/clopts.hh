@@ -285,6 +285,10 @@ struct static_string {
     static constexpr bool is_static_string = true;
 };
 
+/// Deduction guide to shut up nonsense CTAD warnings.
+template <size_t sz>
+static_string(const char (&)[sz]) -> static_string<sz>;
+
 template <std::size_t size>
 struct string_or_int {
     detail::static_string<size> s{};
