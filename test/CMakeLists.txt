@@ -15,6 +15,12 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(tests test.cc ../include/clopts.hh)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_executable(fuzz fuzz.cc ../include/clopts.hh)
+    target_compile_options(fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_link_options(fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+endif()
+
 if (NOT MSVC)
     target_compile_options(tests PRIVATE
         -Wall -Wextra -Werror

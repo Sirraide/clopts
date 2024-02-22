@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
@@ -14,7 +15,6 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
-#include <bitset>
 
 #ifndef CLOPTS_USE_MMAP
 #    ifdef __linux__
@@ -952,6 +952,12 @@ public:
     }
 
 private:
+    /// Get the program name, if available.
+    auto program_name() const -> std::string_view {
+        if (argv) return argv[0];
+        else return {};
+    }
+
     /// Handle an option value.
     template <typename opt, bool is_multiple>
     void dispatch_option_with_arg(std::string_view opt_str, std::string_view opt_val) {
@@ -997,9 +1003,9 @@ private:
         /// New API: program name + help message [+ user data].
         using sv = std::string_view;
         if constexpr (requires { opt::help_callback(sv{}, sv{}, user_data); })
-            opt::help_callback(sv{argv[0]}, sv{}, user_data);
+            opt::help_callback(sv{program_name()}, sv{}, user_data);
         else if constexpr (requires { opt::help_callback(sv{}, sv{}); })
-            opt::help_callback(sv{argv[0]}, help_message_raw.sv());
+            opt::help_callback(sv{program_name()}, help_message_raw.sv());
 
         /// Compatibility for callbacks that don’t take the program name.
         else if constexpr (requires { opt::help_callback(sv{}, user_data); })
@@ -1016,7 +1022,9 @@ private:
 
     /// Error handler that is used if the user doesn’t provide one.
     bool default_error_handler(std::string&& errmsg) {
-        std::cerr << argv[0] << ": " << errmsg << "\n";
+        auto name = program_name();
+        if (not name.empty()) std::cerr << name << ": ";
+        std::cerr << errmsg << "\n";
 
         /// Invoke the help option.
         bool invoked = false;
@@ -1031,7 +1039,12 @@ private:
         (invoke.template operator()<opts>(), ...);
 
         /// If no help option was found, print the help message.
-        if (not invoked) std::cerr << "Usage: " << argv[0] << " " << help();
+        if (not invoked) {
+            std::cerr << "Usage: ";
+            if (not name.empty()) std::cerr << name << " ";
+            std::cerr << help();
+        }
+
         std::exit(1);
     };
 
