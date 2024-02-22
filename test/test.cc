@@ -582,7 +582,7 @@ TEST_CASE("stop_parsing<> option") {
 /*TEST_CASE("Aliased options are equivalent") {
     using options = clopts<
         multiple<option<"--string", "A string", std::string>>,
-        aliases<"-s", "--string">
+        alias<"-s", "--string">
     >;
 
     std::array args = {

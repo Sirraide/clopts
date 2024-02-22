@@ -1195,8 +1195,6 @@ private:
         else { return handle_opt_with_arg<opt, is_multiple>(opt_str); }
     }
 
-#undef INVOKE
-
     template <typename opt>
     bool handle_positional_impl(std::string_view opt_str) {
         static_assert(not detail::is_callback<typename opt::type>, "positional<>s may not have a callback");
@@ -1444,13 +1442,6 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
 template <detail::static_string stop_at = "--">
 struct stop_parsing : option<stop_at, "Stop parsing command-line arguments", detail::special_tag, false> {
     static constexpr inline bool is_stop_parsing = true;
-};
-
-/// Alias declaration.
-template <detail::static_string... _names>
-struct aliases : option<"_", "_", detail::special_tag, false> {
-    static constexpr std::tuple names = {_names...};
-    static constexpr inline bool is_aliases = true;
 };
 
 } // namespace command_line_options
