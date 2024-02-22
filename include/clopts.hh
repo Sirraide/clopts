@@ -602,6 +602,8 @@ class clopts_impl<list<opts...>, list<special...>> {
     /// =======================================================================
     ///  Validation.
     /// =======================================================================
+    static_assert(sizeof...(opts) > 0, "At least one option is required");
+
     /// Make sure no two options have the same name.
     static consteval bool check_duplicate_options() {
         /// State is ok initially.
