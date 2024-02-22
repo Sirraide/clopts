@@ -6,6 +6,10 @@ using namespace command_line_options;
 static void nop() {
 }
 
+static void help_handler(std::string_view) {
+    throw std::exception();
+}
+
 using options = clopts<
     positional<"foobar", "[description goes here]", std::string, false>,
     option<"--size", "The size parameter (whatever that means)", int64_t>,
@@ -13,11 +17,10 @@ using options = clopts<
     flag<"--test", "Test flag">,
     option<"--prime", "A prime number that is less than 14", values<2, 3, 5, 7, 11, 13>>,
     func<"--func", "foobar", nop>,
-    help<>
+    help<help_handler>
 >;
 
-static bool error_handler(std::string&& error_message) {
-    std::cerr << error_message << std::endl;
+static bool error_handler(std::string&&) {
     throw std::exception();
 }
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(clopts VERSION 2.1.0)
+project(clopts VERSION 2.2.0)
 
 set(CMAKE_CXX_STANDARD 26)
 
@@ -15,9 +15,13 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(tests test.cc ../include/clopts.hh)
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_executable(fuzz fuzz.cc ../include/clopts.hh)
-    target_compile_options(fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+    target_compile_options(fuzz PRIVATE
+        $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3>
+        $<$<CONFIG:RELEASE>:-O3 -march=native>
+        -fsanitize=fuzzer,address,undefined
+    )
     target_link_options(fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
 endif()
 
