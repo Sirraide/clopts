@@ -14,6 +14,7 @@
 #include <tuple>
 #include <type_traits>
 #include <vector>
+#include <bitset>
 
 #ifndef CLOPTS_USE_MMAP
 #    ifdef __linux__
@@ -734,7 +735,7 @@ public:
     class optvals_type {
         friend clopts_impl;
         optvals_tuple_t optvals{};
-        std::array<bool, sizeof...(opts)> opts_found{};
+        std::bitset<sizeof...(opts)> opts_found{};
         std::conditional_t<has_stop_parsing, std::span<const char*>, empty> unprocessed_args{};
 
         /// This implements get<>() and get_or<>().
