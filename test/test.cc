@@ -543,6 +543,37 @@ TEST_CASE("stop_parsing<> option") {
         REQUIRE(unprocessed.size() == 1);
         CHECK(unprocessed[0] == "--bar"sv);
     }
+
+    SECTION("can occur multiple times") {
+        using options2 = clopts<
+            flag<"--bar", "Bar option">,
+            stop_parsing<>,
+            stop_parsing<"stop">>;
+
+        std::array args1 = {
+            "test",
+            "--",
+            "--bar",
+        };
+
+        std::array args2 = {
+            "test",
+            "stop",
+            "--baz",
+        };
+
+        auto opts1 = options2::parse(args1.size(), args1.data(), error_handler);
+        auto opts2 = options2::parse(args2.size(), args2.data(), error_handler);
+        auto unprocessed1 = opts1.unprocessed();
+        auto unprocessed2 = opts2.unprocessed();
+
+        REQUIRE(not opts1.get<"--bar">());
+        REQUIRE(not opts2.get<"--bar">());
+        REQUIRE(unprocessed1.size() == 1);
+        REQUIRE(unprocessed2.size() == 1);
+        CHECK(unprocessed1[0] == "--bar"sv);
+        CHECK(unprocessed2[0] == "--baz"sv);
+    }
 }
 
 /*TEST_CASE("Aliased options are equivalent") {

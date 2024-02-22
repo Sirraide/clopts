@@ -1418,6 +1418,8 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
     static_assert(not detail::is<base_type, bool>, "Type of multiple<> cannot be bool");
     static_assert(not detail::is<base_type, detail::callback_arg_type>, "Type of multiple<> cannot be a callback");
     static_assert(not detail::is<base_type, detail::callback_noarg_type>, "Type of multiple<> cannot be a callback");
+    static_assert(not requires { opt::is_multiple; }, "multiple<multiple<>> is invalid");
+    static_assert(not requires { opt::is_stop_parsing; }, "multiple<stop_parsing<>> is invalid");
 
     constexpr multiple() = delete;
     static constexpr inline bool is_multiple = true;

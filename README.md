@@ -319,6 +319,20 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 * There can only be at most one `multiple<positional<>>` option.
 * `multiple<multiple<>>` is invalid.
 
+### Option Type: `stop_parsing<>`
+This option is used to indicate that the parser should stop processing options when it is encountered. It takes
+a single optional string argument whose default value is `"--"`:
+```c++
+stop_parsing<> // Equivalent to 'stop_parsing<"--">'.
+```
+
+#### **Properties**
+* This option is never required.
+* More than one `stop_parsing<>` option is allowed, if you really have a need for that somehow.
+* `multiple<stop_parsing<>>` is invalid.
+* Any unprocessed options *after* the stop parsing option can be retrieved using the `unprocessed()` function of the
+  type returned by `parse()`.
+* The parser will still error if there are any required options that were not seen before parsing was stopped.
 ### Option Type: `func`
 A `func` defines a callback that is called by the parser when the
 option is encountered. You can specify additional data to be passed

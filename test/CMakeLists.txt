@@ -31,9 +31,19 @@ if (NOT WIN32)
     target_link_libraries(tests PRIVATE m)
 endif()
 target_link_libraries(tests PRIVATE Catch2::Catch2WithMain)
-set_target_properties(tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
 include(Catch)
 catch_discover_tests(tests)
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_test(
+        NAME static-assert-errors
+        COMMAND "${CMAKE_CXX_COMPILER}"
+            -std=c++26 -fsyntax-only
+            -Xclang -verify
+            "${PROJECT_SOURCE_DIR}/errors.cc"
+            -isystem "${PROJECT_SOURCE_DIR}/../include"
+    )
+endif()
