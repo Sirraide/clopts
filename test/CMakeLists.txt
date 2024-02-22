@@ -41,8 +41,10 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_test(
         NAME static-assert-errors
         COMMAND "${CMAKE_CXX_COMPILER}"
-            -std=c++26 -fsyntax-only
             -Xclang -verify
+            -std=c++26
+            -fsyntax-only
+            -ferror-limit=0
             "${PROJECT_SOURCE_DIR}/errors.cc"
             -isystem "${PROJECT_SOURCE_DIR}/../include"
     )

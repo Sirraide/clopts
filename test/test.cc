@@ -13,6 +13,9 @@ static bool error_handler(std::string&& s) {
     throw std::runtime_error(s);
 }
 
+static_assert(detail::is_positional_v<positional<"foo", "bar">>);
+static_assert(detail::is_positional_v<multiple<positional<"foo", "bar">>>);
+
 using basic_options = clopts<
     option<"--string", "A string", std::string>,
     option<"--number", "A number", int64_t>,
