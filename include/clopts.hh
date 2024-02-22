@@ -9,6 +9,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <span>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -90,6 +91,12 @@ constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
     std::reverse(start, out);
     return std::size_t(out - start);
 }
+
+/// Empty type.
+struct empty {};
+
+/// List of types.
+template <typename ...> struct list;
 
 /// Check if two types are the same.
 template <typename a, typename ...bs>
@@ -229,7 +236,7 @@ struct at_scope_exit {
 
 /// Tag used for options that modify the options (parser) but
 /// do not constitute actual options in an of themselves.
-struct noop_tag {};
+struct special_tag;
 
 /// Compile-time string.
 template <size_t sz>
@@ -362,7 +369,7 @@ concept is_valid_option_type = is_same<type, std::string, // clang-format off
     bool,
     double,
     int64_t,
-    noop_tag,
+    special_tag,
     callback_arg_type,
     callback_noarg_type
 > or is_vector_v<type> or requires { type::is_values; } or requires { type::is_file_data; };
@@ -539,13 +546,50 @@ constexpr void While(bool& cond, auto&& lambda) {
     (impl.template operator()<pack>() and ...);
 }
 
+/// Check if an option is a regular option.
+template <typename opt>
+struct regular_option {
+    static constexpr bool value = not is<typename opt::type, special_tag>;
+};
+
+/// Check if an option is a special option.
+template <typename opt>
+struct special_option {
+    static constexpr bool value = not regular_option<opt>::value;
+};
+
+/// Filter a pack of types.
+template <template <typename> typename, typename...>
+struct filter_impl;
+
+template < // clang-format off
+    template <typename> typename cond,
+    typename ...processed,
+    typename next,
+    typename ...rest
+> struct filter_impl<cond, list<processed...>, next, rest...> {
+    using type = std::conditional_t<cond<next>::value,
+        typename filter_impl<cond, list<processed..., next>, rest...>::type,
+        typename filter_impl<cond, list<processed...>, rest...>::type
+    >;
+}; // clang-format on
+
+template <template <typename> typename cond, typename... processed>
+struct filter_impl<cond, list<processed...>> {
+    using type = list<processed...>;
+};
+
+template <template <typename> typename cond, typename... types>
+using filter = typename filter_impl<cond, list<>, types...>::type;
+
 /// ===========================================================================
 ///  Main implementation.
 /// ===========================================================================
 template <typename... opts>
-class clopts_impl {
-    using This = clopts_impl<opts...>;
+class clopts_impl;
 
+template <typename... opts, typename... special>
+class clopts_impl<list<opts...>, list<special...>> {
     /// This should never be instantiated by the user.
     explicit clopts_impl() {}
     ~clopts_impl() {}
@@ -618,6 +662,8 @@ class clopts_impl {
     using string = std::string;
     using integer = int64_t;
 
+    static constexpr bool has_stop_parsing = (requires { special::is_stop_parsing; } or ...);
+
 public:
     using error_handler_t = std::function<bool(std::string&&)>;
 
@@ -689,6 +735,7 @@ public:
         friend clopts_impl;
         optvals_tuple_t optvals{};
         std::array<bool, sizeof...(opts)> opts_found{};
+        std::conditional_t<has_stop_parsing, std::span<const char*>, empty> unprocessed_args{};
 
         /// This implements get<>() and get_or<>().
         template <detail::static_string s>
@@ -746,6 +793,19 @@ public:
             } else {
                 assert_valid_option_name<(sz < sizeof...(opts)), s>();
             }
+        }
+
+        /// \brief Get unprocessed options.
+        ///
+        /// If the \c stop_parsing\<> option was encountered, this will return the
+        /// remaining options that have not been processed by this parser. If there
+        /// is no \c stop_parsing\<> option, this will always return an empty span.
+        ///
+        /// If there was an error during parsing, the return value of this function
+        /// is unspecified.
+        [[nodiscard]] auto unprocessed() const -> std::span<const char*> {
+            if constexpr (has_stop_parsing) return unprocessed_args;
+            else return {};
         }
     };
 
@@ -1160,10 +1220,23 @@ private:
         return (handle.template operator()<opts>(opt_str) or ...);
     };
 
+    /// Check if we should stop parsing.
+    template <typename opt>
+    bool stop_parsing(std::string_view opt_str) {
+        if constexpr (requires { opt::is_stop_parsing; }) return opt_str == opt::name.sv();
+        return false;
+    }
+
     void parse() {
         /// Main parser loop.
         for (argi = 1; argi < argc; argi++) {
             std::string_view opt_str{argv[argi]};
+
+            /// Stop parsing if this is the stop_parsing<> option.
+            if ((stop_parsing<special>(opt_str) or ...)) {
+                argi++;
+                break;
+            }
 
             /// Attempt to handle the option.
             if (not handle_regular(opt_str) and not handle_positional(opt_str)) {
@@ -1188,6 +1261,14 @@ private:
                 handle_error(std::move(errmsg));
             }
         });
+
+        /// Save unprocessed options.
+        if constexpr (has_stop_parsing) {
+            optvals.unprocessed_args = std::span<const char*>{
+                argv + argi,
+                static_cast<std::size_t>(argc - argi),
+            };
+        }
     }
 
 public:
@@ -1207,7 +1288,7 @@ public:
         void* user_data = nullptr
     ) -> optvals_type {
         /// Initialise state.
-        This self;
+        clopts_impl self;
         if (error_handler) self.error_handler = error_handler;
         else self.error_handler = [&](auto&& e) { return self.default_error_handler(std::forward<decltype(e)>(e)); };
         self.argc = argc;
@@ -1231,7 +1312,10 @@ public:
 /// ===========================================================================
 /// Main command-line options type.
 template <typename... opts>
-using clopts = detail::clopts_impl<opts...>;
+using clopts = detail::clopts_impl< // clang-format off
+    detail::filter<detail::regular_option, opts...>,
+    detail::filter<detail::special_option, opts...>
+>; // clang-format on
 
 /// Values for an option.
 using detail::values;
@@ -1340,9 +1424,15 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
     using is_positional_ = detail::positional_t<opt>;
 };
 
+/// Stop parsing when this option is encountered.
+template <detail::static_string stop_at = "--">
+struct stop_parsing : option<stop_at, "Stop parsing command-line arguments", detail::special_tag, false> {
+    static constexpr inline bool is_stop_parsing = true;
+};
+
 /// Alias declaration.
 template <detail::static_string... _names>
-struct aliases : option<"_", "_", detail::noop_tag, false> {
+struct aliases : option<"_", "_", detail::special_tag, false> {
     static constexpr std::tuple names = {_names...};
     static constexpr inline bool is_aliases = true;
 };

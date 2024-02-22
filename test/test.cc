@@ -456,6 +456,95 @@ TEST_CASE("File option can map a file properly") {
     run.template operator()<file<std::string, std::vector<char>>>();
 }
 
+TEST_CASE("stop_parsing<> option") {
+    using options = clopts<
+        multiple<option<"--foo", "Foo option", std::string, true>>,
+        flag<"--bar", "Bar option">,
+        stop_parsing<"stop">>;
+
+    SECTION("stops parsing") {
+        std::array args = {
+            "test",
+            "--foo",
+            "arg",
+            "--foo",
+            "stop", /// Argument of '--foo'
+            "stop", /// Stop parsing
+            "--bar",
+            "--foo", /// Missing argument, but ignored because it’s after 'stop'.
+        };
+
+        auto opts = options::parse(args.size(), args.data(), error_handler);
+        REQUIRE(opts.get<"--foo">());
+        REQUIRE(opts.get<"--foo">()->size() == 2);
+        CHECK(opts.get<"--foo">()->at(0) == "arg");
+        CHECK(opts.get<"--foo">()->at(1) == "stop");
+        CHECK(not opts.get<"--bar">());
+
+        auto unprocessed = opts.unprocessed();
+        REQUIRE(unprocessed.size() == 2);
+        CHECK(unprocessed[0] == "--bar"sv);
+        CHECK(unprocessed[1] == "--foo"sv);
+    }
+
+    SECTION("errors if there are missing required options") {
+        std::array args = {
+            "test",
+            "stop"
+        };
+
+        CHECK_THROWS(options::parse(args.size(), args.data(), error_handler));
+    }
+
+    SECTION("is never required") {
+        std::array args = {
+            "test",
+            "--foo",
+            "arg",
+        };
+
+        auto opts = options::parse(args.size(), args.data(), error_handler);
+        REQUIRE(opts.get<"--foo">());
+        REQUIRE(opts.get<"--foo">()->size() == 1);
+        CHECK(opts.get<"--foo">()->at(0) == "arg");
+        CHECK(opts.unprocessed().empty());
+    }
+
+    SECTION("is effectively a no-op if it’s the last argument") {
+        std::array args = {
+            "test",
+            "--foo",
+            "arg",
+            "stop",
+        };
+
+        auto opts = options::parse(args.size(), args.data(), error_handler);
+        REQUIRE(opts.get<"--foo">());
+        REQUIRE(opts.get<"--foo">()->size() == 1);
+        CHECK(opts.get<"--foo">()->at(0) == "arg");
+        CHECK(opts.unprocessed().empty());
+    }
+
+    SECTION("uses '--' by default") {
+        using options2 = clopts<
+            flag<"--bar", "Bar option">,
+            stop_parsing<>>;
+
+        std::array args = {
+            "test",
+            "--",
+            "--bar",
+        };
+
+        auto opts = options2::parse(args.size(), args.data(), error_handler);
+        REQUIRE(not opts.get<"--bar">());
+
+        auto unprocessed = opts.unprocessed();
+        REQUIRE(unprocessed.size() == 1);
+        CHECK(unprocessed[0] == "--bar"sv);
+    }
+}
+
 /*TEST_CASE("Aliased options are equivalent") {
     using options = clopts<
         multiple<option<"--string", "A string", std::string>>,
