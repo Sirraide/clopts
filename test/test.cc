@@ -204,6 +204,75 @@ TEST_CASE("Positional options are required by default") {
     CHECK_THROWS(options::parse(0, nullptr, error_handler));
 }
 
+TEST_CASE("Positional values<> work") {
+    using string_options = clopts<positional<"format", "Output format", values<"foo", "bar">>>;
+    using int_options = clopts<positional<"format", "Output format", values<0, 1>>>;
+
+    SECTION("Correct values are accepted") {
+        std::array args1 = {"test", "foo"};
+        std::array args2 = {"test", "bar"};
+        std::array args3 = {"test", "0"};
+        std::array args4 = {"test", "1"};
+
+        auto opts1 = string_options::parse(args1.size(), args1.data(), error_handler);
+        auto opts2 = string_options::parse(args2.size(), args2.data(), error_handler);
+        auto opts3 = int_options::parse(args3.size(), args3.data(), error_handler);
+        auto opts4 = int_options::parse(args4.size(), args4.data(), error_handler);
+
+        REQUIRE(opts1.get<"format">());
+        REQUIRE(opts2.get<"format">());
+        REQUIRE(opts3.get<"format">());
+        REQUIRE(opts4.get<"format">());
+
+        CHECK(*opts1.get<"format">() == "foo");
+        CHECK(*opts2.get<"format">() == "bar");
+        CHECK(*opts3.get<"format">() == 0);
+        CHECK(*opts4.get<"format">() == 1);
+    }
+
+    SECTION("Invalid values raise an error") {
+        std::array args1 = {"test", "baz"};
+        std::array args2 = {"test", "2"};
+
+        CHECK_THROWS(string_options::parse(args1.size(), args1.data(), error_handler));
+        CHECK_THROWS(int_options::parse(args2.size(), args2.data(), error_handler));
+    }
+}
+
+TEST_CASE("Multiple positional values<> work") {
+    using string_options = clopts<multiple<positional<"format", "Output format", values<"foo", "bar">>>>;
+    using int_options = clopts<multiple<positional<"format", "Output format", values<0, 1>>>>;
+
+    SECTION("Correct values are accepted") {
+        std::array args1 = {"test", "foo", "bar", "foo"};
+        std::array args2 = {"test", "0", "1", "1"};
+
+        auto opts1 = string_options::parse(args1.size(), args1.data(), error_handler);
+        auto opts2 = int_options::parse(args2.size(), args2.data(), error_handler);
+
+        REQUIRE(opts1.get<"format">());
+        REQUIRE(opts2.get<"format">());
+
+        REQUIRE(opts1.get<"format">()->size() == 3);
+        REQUIRE(opts2.get<"format">()->size() == 3);
+
+        CHECK(opts1.get<"format">()->at(0) == "foo");
+        CHECK(opts1.get<"format">()->at(1) == "bar");
+        CHECK(opts1.get<"format">()->at(2) == "foo");
+        CHECK(opts2.get<"format">()->at(0) == 0);
+        CHECK(opts2.get<"format">()->at(1) == 1);
+        CHECK(opts2.get<"format">()->at(2) == 1);
+    }
+
+    SECTION("Invalid values raise an error") {
+        std::array args1 = {"test", "foo", "baz", "foo"};
+        std::array args2 = {"test", "0", "2", "1"};
+
+        CHECK_THROWS(string_options::parse(args1.size(), args1.data(), error_handler));
+        CHECK_THROWS(int_options::parse(args2.size(), args2.data(), error_handler));
+    }
+}
+
 TEST_CASE("Short option options are parsed properly") {
     using options = clopts<
         experimental::short_option<"s", "A string", std::string>,
@@ -360,7 +429,7 @@ TEST_CASE("Calling from main() works as expected") {
 }
 
 TEST_CASE("File option can map a file properly") {
-    auto run = [] <typename file> {
+    auto run = []<typename file> {
         using options = clopts<option<"file", "A file", file>>;
 
         std::array args = {

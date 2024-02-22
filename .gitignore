@@ -1,6 +1,7 @@
 .idea/
 test/out/
 test/tests
+cmake-build-*
 
 # Windows stuff
 .vs/

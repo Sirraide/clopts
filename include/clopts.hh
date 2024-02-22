@@ -811,10 +811,11 @@ private:
         size_t max_vals_opt_name_len{};
         size_t max_len{};
         auto determine_length = [&]<typename opt> {
+            if constexpr (opt::is_values)
+                max_vals_opt_name_len = std::max(max_vals_opt_name_len, opt::name.len);
+
             /// Positional options go on the first line, so ignore them here.
             if constexpr (not detail::is_positional_v<opt>) {
-                if constexpr (opt::is_values)
-                    max_vals_opt_name_len = std::max(max_vals_opt_name_len, opt::name.len);
                 if constexpr (detail::should_print_argument_type<opt>) {
                     auto n = type_name<typename opt::type>();
                     max_len = std::max(max_len, opt::name.len + (n.len + sizeof("<> ") - 1));
@@ -892,7 +893,7 @@ public:
 private:
     /// Handle an option value.
     template <typename opt, bool is_multiple>
-    auto dispatch_option_with_arg(std::string_view opt_str, std::string_view opt_val) {
+    void dispatch_option_with_arg(std::string_view opt_str, std::string_view opt_val) {
         using opt_type = typename opt::type;
 
         /// Mark the option as found.
@@ -1124,6 +1125,8 @@ private:
 
     template <typename opt>
     bool handle_positional_impl(std::string_view opt_str) {
+        static_assert(not detail::is_callback<typename opt::type>, "positional<>s may not have a callback");
+
         /// If we've already encountered this positional option, then return.
         static constexpr bool is_multiple = requires { opt::is_multiple; };
         if constexpr (not is_multiple) {
@@ -1131,9 +1134,7 @@ private:
         }
 
         /// Otherwise, attempt to parse this as the option value.
-        set_found<opt::name>();
-        if constexpr (is_multiple) ref<opt::name>().push_back(make_arg<typename opt::type>(opt_str));
-        else ref<opt::name>() = make_arg<typename opt::type>(opt_str.data());
+        dispatch_option_with_arg<opt, is_multiple>(opt::name.sv(), opt_str);
         return true;
     }
 

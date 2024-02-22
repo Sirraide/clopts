@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(clopts VERSION 2.0.0)
+project(clopts VERSION 2.1.0)
 
 set(CMAKE_CXX_STANDARD 26)
 
