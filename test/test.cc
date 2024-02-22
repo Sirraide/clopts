@@ -13,6 +13,21 @@ static bool error_handler(std::string&& s) {
     throw std::runtime_error(s);
 }
 
+template <typename path_type = std::filesystem::path, typename contents_type = std::string>
+static auto this_file() -> std::pair<path_type, contents_type> {
+    std::string_view _file_ = __FILE__;
+    std::ifstream f{__FILE__};
+    contents_type contents{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    path_type path{_file_.begin(), _file_.end()};
+    return std::pair{path, contents};
+}
+
+static void print_number_and_exit(void* arg, std::string_view) {
+    int* i = reinterpret_cast<int*>(arg);
+    std::cout << *i;
+    std::exit(0);
+}
+
 static_assert(detail::is_positional_v<positional<"foo", "bar">>);
 static_assert(detail::is_positional_v<multiple<positional<"foo", "bar">>>);
 
@@ -441,12 +456,7 @@ TEST_CASE("File option can map a file properly") {
             __FILE__,
         };
 
-        /// I can’t exactly test my file mapping code against itself.
-        std::string_view _file_ = __FILE__;
-        std::ifstream f{__FILE__};
-        typename file::contents_type contents{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
-        typename file::path_type path{_file_.begin(), _file_.end()};
-
+        auto [path, contents] = this_file<typename file::path_type, typename file::contents_type>();
         auto opts = options::parse(args.size(), args.data(), error_handler);
         REQUIRE(opts.template get<"file">());
         CHECK(opts.template get<"file">()->path == path);
@@ -577,6 +587,70 @@ TEST_CASE("stop_parsing<> option") {
         CHECK(unprocessed1[0] == "--bar"sv);
         CHECK(unprocessed2[0] == "--baz"sv);
     }
+}
+
+TEST_CASE("Parser does not crash on invalid input") {
+    std::array<const char*, 0> args1 = {};
+    std::array args2 = { "test" };
+
+    (void) basic_options::parse(args1.size(), args1.data(), error_handler);
+    (void) basic_options::parse(args2.size(), args2.data(), error_handler);
+}
+
+TEST_CASE("Documentation compiles (example 1)") {
+    using options = clopts<
+        option<"--repeat", "How many times the output should be repeated (default 1)", int64_t>,
+        positional<"file", "The file whose contents should be printed", file<>, /*required=*/true>,
+        help<>>;
+
+    std::array args = {
+        "test",
+        "--repeat",
+        "3",
+        __FILE__,
+    };
+
+    auto opts = options::parse(args.size(), args.data(), error_handler);
+    auto& file_contents = opts.get<"file">()->contents;
+    auto repeat_count = opts.get_or<"--repeat">(1);
+    std::string actual;
+    for (std::int64_t i = 0; i < repeat_count; i++)
+        actual += file_contents;
+
+    auto [path, contents] = this_file();
+    CHECK(actual == contents + contents + contents);
+}
+
+TEST_CASE("Documentation compiles (example 2)") {
+    using options = clopts<
+        positional<"file", "The name of the file", file<std::vector<std::byte>>, true>,
+        positional<"foobar", "[description goes here]", std::string, false>,
+        option<"--size", "The size parameter (whatever that means)", int64_t>,
+        multiple<option<"--int", "Integers", int64_t, true>>,
+        flag<"--test", "Test flag">,
+        option<"--prime", "A prime number that is less than 14", values<2, 3, 5, 7, 11, 13>>,
+        func<"--func", "Print 42 and exit", print_number_and_exit>,
+        help<>>;
+
+    std::array args = {
+        "test",
+        __FILE__,
+        "--int",
+        "3",
+        "--int",
+        "42",
+    };
+
+    int number = 42;
+    auto opts = options::parse(args.size(), args.data(), nullptr, &number);
+    auto ints = opts.get<"--int">();
+    std::string out;
+    if (ints->empty()) out = "No ints!\n";
+    else {
+        for (const auto& i : *ints) out += std::to_string(i) + "\n";
+    }
+
+    CHECK(out == "3\n42\n");
 }
 
 /*TEST_CASE("Aliased options are equivalent") {
