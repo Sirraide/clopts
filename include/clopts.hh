@@ -453,7 +453,7 @@ struct opt_impl {
 };
 
 /// Default help handler.
-inline void default_help_handler(std::string_view program_name, std::string_view msg) {
+[[noreturn]] inline void default_help_handler(std::string_view program_name, std::string_view msg) {
     std::cerr << "Usage: " << program_name << " " << msg;
     std::exit(1);
 }
