@@ -627,6 +627,8 @@ class clopts_impl<list<opts...>, list<special...>> {
         return ok;
     }
 
+    // This check is currently broken on MSVC 19.38 and later, for some reason.
+#if !defined(_MSC_VER) || defined(__clang__) || _MSC_VER < 1938
     /// Make sure that no option has a prefix that is a short option.
     static consteval bool check_short_opts() {
         /// State is ok initially.
@@ -648,6 +650,9 @@ class clopts_impl<list<opts...>, list<special...>> {
         return ok;
     }
 
+    static_assert(check_short_opts(), "Option name may not start with the name of a short option");
+#endif
+
     /// Make sure there is at most one multiple<positional<>> option.
     static consteval size_t validate_multiple() {
         auto is_mul = []<typename opt>() { return requires { opt::is_multiple; }; };
@@ -656,7 +661,6 @@ class clopts_impl<list<opts...>, list<special...>> {
 
     /// Make sure we don’t have invalid option combinations.
     static_assert(check_duplicate_options(), "Two different options may not have the same name");
-    static_assert(check_short_opts(), "Option name may not start with the name of a short option");
     static_assert(validate_multiple() <= 1, "Cannot have more than one multiple<positional<>> option");
 
     /// Various types.
