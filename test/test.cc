@@ -597,6 +597,24 @@ TEST_CASE("Parser does not crash on invalid input") {
     (void) basic_options::parse(args2.size(), args2.data(), error_handler);
 }
 
+TEST_CASE("Overridable options work") {
+    std::array args = {
+        "test",
+        "-x", "a",
+        "-x", "b",
+        "-x", "c",
+    };
+
+    using options1 = clopts<option<"-x", "A string", std::string, false, true>>;
+    using options2 = clopts<overridable<"-x", "A string">>;
+
+    auto opts1 = options1::parse(args.size(), args.data(), error_handler);
+    auto opts2 = options2::parse(args.size(), args.data(), error_handler);
+
+    CHECK(*opts1.get<"-x">() == "c");
+    CHECK(*opts2.get<"-x">() == "c");
+}
+
 TEST_CASE("Documentation compiles (example 1)") {
     using options = clopts<
         option<"--repeat", "How many times the output should be repeated (default 1)", int64_t>,

@@ -1162,8 +1162,8 @@ private:
         using base_type = base_type_t<typename opt::type>;
         static constexpr bool is_multiple = requires { opt::is_multiple; };
         if constexpr (not is_multiple and not detail::is_callback<base_type>) {
-            /// Duplicate options are not allowed by default.
-            if (found<opt::name>()) {
+            /// Duplicate options are not allowed, unless they’re overridable.
+            if (not opt::is_overridable and found<opt::name>()) {
                 std::string errmsg;
                 errmsg += "Duplicate option: \"";
                 errmsg += opt_str;
@@ -1345,6 +1345,14 @@ template <
     bool overridable = false>
 struct option : detail::opt_impl<_name, _description, type, required, overridable> {};
 
+/// Identical to 'option', but overridable by default.
+template <
+    detail::static_string _name,
+    detail::static_string _description = "",
+    typename type = std::string,
+    bool required = false>
+struct overridable : option<_name, _description, type, required, true> {};
+
 namespace experimental {
 /// Base short option type.
 template <
@@ -1385,6 +1393,9 @@ struct file {
 using file_data = file<>;
 
 /// A positional option.
+///
+/// Positional options cannot be overridable; use multiple<positional<>>
+/// instead.
 template <
     detail::static_string _name,
     detail::static_string _description,
@@ -1437,7 +1448,7 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
     static_assert(not detail::is<base_type, detail::callback_noarg_type>, "Type of multiple<> cannot be a callback");
     static_assert(not requires { opt::is_multiple; }, "multiple<multiple<>> is invalid");
     static_assert(not requires { opt::is_stop_parsing; }, "multiple<stop_parsing<>> is invalid");
-    static_assert(not opt::is_overridable, "multiple<> options must not be overridable");
+    static_assert(not opt::is_overridable, "multiple<> cannot be overridable");
 
     constexpr multiple() = delete;
     static constexpr bool is_multiple = true;

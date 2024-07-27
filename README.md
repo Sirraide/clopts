@@ -202,11 +202,11 @@ message.
 Note that the name can be anything you want. The `--` are not required.
 
 ### Option Type: `option`
-The most basic option type is `option`. This option type takes up to four template parameters, the last two of which are optional.
+The most basic option type is `option`. This option type takes up to five template parameters, the last two of which are optional.
 ```c++
 option<"--name", "Description">
 option<"--name", "Description", std::string>
-option<"--name", "Description", std::string, /* required? */ false>
+option<"--name", "Description", std::string, /* required? */ false, /* overridable? */ false>
 ```
 
 #### **Parameters**
@@ -214,7 +214,10 @@ option<"--name", "Description", std::string, /* required? */ false>
 2. A description of the option, also a string literal (at most 512 bytes).
 3. The type of the option (see below). The default is `std::string`.
 4. Whether the option is required, i.e. whether omitting it is an error.
-  The default is `false`.
+   The default is `false`.
+5. Whether the option is overridable, i.e. whether it can be specified more
+   than once, in which case only the last value is retained. This is different
+   from `multiple<>` (see below). The default is `false`.
 
 #### **Types and Arguments**
 The `option` type always takes an argument. Both `--option value` and `--option=value` are recognised by the parser.
@@ -246,7 +249,9 @@ If the values are strings, `get<>` will return a `std::string`; if the values ar
 
 ### Option Type: `flag`
 Flags have no argument. For flags, `get<>()` returns a `bool` that is `true` when they're present, 
-and `false` otherwise. Flags are never required as that wouldn’t make much sense.
+and `false` otherwise, i.e. they default to `false`. Flags are never required as that wouldn’t make much sense (just ...
+don’t pass the flag if you don’t want it to be set); they also can’t be overridable, because once they’re set, there
+is no unsetting them.
 ```c++
 flag<"--name", "Description">
 ```
@@ -257,7 +262,9 @@ line. If the parser encounters an option whose name it does not recognise, it
 will store it in the first positional argument that does not yet have
 a value. 
 
-Just like `option`s, positional arguments take up to four template parameters and need not be strings. However, unlike `option`s, positional arguments are required by default.
+Just like `option`s, positional arguments take up to four template parameters and need not be strings. However, 
+unlike `option`s, positional arguments are required by default. Additionally, positional options can’t be
+overridable (see `multiple<>` for more info on this).
 
 By way of illustration, consider the following options:
 ```c++
@@ -305,7 +312,7 @@ clopts<
 ```
 
 ### Meta-Option Type: `multiple<>`
-The `multiple` option type can not be used on its own and instead wraps another option and modifies it such that multiple occurrences of that option are allowed:
+The `multiple` option type can’t be used on its own and instead wraps another option and modifies it such that multiple occurrences of that option are allowed:
 ```c++
 multiple<option<"--int", "A number", int64_t>>
 ```
@@ -314,10 +321,24 @@ Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns 
 
 #### **Properties**
 * If the wrapped option is marked as required, then it is required to be present at least once.
+* `multiple<>` options cannot be overridable.
 * `multiple<>` should only ever be used with `flag`s and `option`s.
 * `multiple<func>` is currently invalid, as `func` options can already occur multiple times.
 * There can only be at most one `multiple<positional<>>` option.
 * `multiple<multiple<>>` is invalid.
+
+#### **Design Note: `multiple<>` and overridable options **
+`multiple<>` is similar to overridable, and both interact with `positional<>` options in an interesting manner. The
+difference between the former is that `multiple<>` captures *all* values that are passed, whereas overridable only
+holds on to the last one. This is also why combining is not allowed, as it doesn’t make sense (both retaining all
+and only the last one obviously doesn’t work).
+
+Furthermore, `positional<>` options can be `multiple<>`, but not overridable. This is currently more of a design
+choice than a necessary restriction: An overridable positional option would have to act identically to a 
+`multiple<positional<>>` option in that it would gobble up any positional arguments that are passed. This means
+we’d also have to check that there isn’t both a `multiple<positional<>>` and an overridable positional option, because
+it’s not clear which one would take precedence. Imo, there also isn’t much of a use case for an overridable `positional<>`
+option that you can’t just use a `multiple<positional<>>` option for, but if anyone has one, feel free to open an issue.
 
 ### Option Type: `stop_parsing<>`
 This option is used to indicate that the parser should stop processing options when it is encountered. It takes
@@ -327,7 +348,7 @@ stop_parsing<> // Equivalent to 'stop_parsing<"--">'.
 ```
 
 #### **Properties**
-* This option is never required.
+* This option is never required and cannot be overridable.
 * More than one `stop_parsing<>` option is allowed, if you really have a need for that somehow.
 * `multiple<stop_parsing<>>` is invalid.
 * Any unprocessed options *after* the stop parsing option can be retrieved using the `unprocessed()` function of the

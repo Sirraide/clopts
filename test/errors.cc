@@ -9,6 +9,7 @@ using o2 = clopts<multiple<stop_parsing<>>>; // expected-error@clopts.hh:* {{mul
 using o3 = clopts<multiple<func<"foo", "bar", callback>>>; // expected-error@clopts.hh:* {{Type of multiple<> cannot be a callback}}
 using o4 = clopts<multiple<help<>>>; // expected-error@clopts.hh:* {{Type of multiple<> cannot be a callback}}
 using o5 = clopts<multiple<flag<"foo", "bar">>>; // expected-error@clopts.hh:* {{Type of multiple<> cannot be bool}}
+using o9 = clopts<multiple<overridable<"foo", "bar">>>; // expected-error@clopts.hh:* {{multiple<> cannot be overridable}}
 
 int a(int argc, char** argv) {
     using o6 = clopts<multiple<positional<"foo", "bar">>, multiple<positional<"baz", "bar">>>;
