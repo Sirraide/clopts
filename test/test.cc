@@ -757,6 +757,32 @@ TEST_CASE("ref<> referencing a multiple<> option.") {
     CHECK((*all2 == tuple{"a", vector{"foo", "bar"}}));
 }
 
+TEST_CASE("multiple<positional<ref>> works") {
+    using options = clopts<
+        multiple<positional<"file", "The file to compile", ref<std::string, "-x">>>,
+        experimental::short_option<"-x", "Override the language", std::string, false, true>,
+        help<>
+    >;
+
+    std::array args = {
+        "test",
+        "-xfoo",
+        "bar",
+    };
+
+    auto opts = options::parse(args.size(), args.data(), error_handler);
+    auto files = opts.get<"file">();
+
+    using tuple = std::tuple<std::string, std::optional<std::string>>;
+    static_assert(std::is_same_v<
+        std::remove_cvref_t<decltype(files)>,
+        std::span<tuple>
+    >);
+
+    REQUIRE(files.size() == 1);
+    CHECK((files[0] == tuple{"bar", "foo"}));
+}
+
 TEST_CASE("Documentation compiles (example 1)") {
     using options = clopts<
         option<"--repeat", "How many times the output should be repeated (default 1)", int64_t>,
