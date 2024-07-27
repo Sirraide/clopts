@@ -311,6 +311,17 @@ clopts<
 >;
 ```
 
+### Option Type: `overridable<>`
+This is just an alias:
+```c++
+overridable<name, description, type>
+``` 
+is equivalent to 
+```c++
+option<name, description, type, /* required */ false, /* overridable */ true>
+```
+in every respect.
+
 ### Meta-Option Type: `multiple<>`
 The `multiple` option type can’t be used on its own and instead wraps another option and modifies it such that multiple occurrences of that option are allowed:
 ```c++
