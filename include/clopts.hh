@@ -748,7 +748,7 @@ class clopts_impl<list<opts...>, list<special...>> {
     using opt_by_name = std::tuple_element_t<optindex<name>(), std::tuple<opts...>>;
 
     // I hate not having pack indexing.
-    template <std::size_t i, static_string str, static_string ...strs>
+    template <std::size_t i, static_string str, static_string... strs>
     static constexpr auto nth_str() {
         if constexpr (i == 0) return str;
         else return nth_str<i - 1, strs...>();
@@ -757,24 +757,37 @@ class clopts_impl<list<opts...>, list<special...>> {
     template <typename opt>
     struct storage_type;
 
+    template <typename opt>
+    using storage_type_t = typename storage_type<opt>::type;
+
+    template <typename opt>
+    using single_element_storage_type_t = remove_vector_t<storage_type_t<opt>>;
+
     template <typename, typename>
     struct compute_ref_storage_type {
         using type = void;
     };
 
+    /// The type used to store a (possibly empty) copy of an option type.
+    template <typename opt>
+    using ref_storage_type_t = // clang-format off
+        // For flags, just store a bool.
+        std::conditional_t<is_same<storage_type_t<opt>, bool>, bool,
+        // For multiple<> options, store a vector, because we need to deep-copy the state.
+        std::conditional_t<is_vector_v<storage_type_t<opt>>, storage_type_t<opt>,
+        // Otherwise, store an optional, since the value may be empty.
+        std::optional<storage_type_t<opt>>
+    >>; // clang-format on
+
     template <typename actual_type, typename actual_type_base, static_string... args>
-    struct compute_ref_storage_type<actual_type, ref<actual_type_base, args...>> {
+    struct compute_ref_storage_type<actual_type, ref<actual_type_base, args...>> { // clang-format off
         using tuple = std::tuple<
             option_type_t<actual_type_base>,
-            std::conditional_t< // FIXME: Duplicated code between this and get_return_type.
-                std::is_same_v<typename storage_type<opt_by_name<args>>::type, bool>,
-                bool,
-                std::optional<typename storage_type<opt_by_name<args>>::type>
-            >...
+            ref_storage_type_t<opt_by_name<args>>...
         >;
 
         using type = std::conditional_t<is_vector_v<actual_type>, std::vector<tuple>, tuple>;
-    };
+    }; // clang-format on
 
     /// Helper to determine the type used to store an option value.
     ///
@@ -788,12 +801,6 @@ class clopts_impl<list<opts...>, list<special...>> {
             typename compute_ref_storage_type<typename opt::actual_type, typename opt::actual_type_base>::type,
             typename opt::canonical_type>;
     };
-
-    template <typename opt>
-    using storage_type_t = typename storage_type<opt>::type;
-
-    template <typename opt>
-    using single_element_storage_type_t = remove_vector_t<storage_type_t<opt>>;
 
     /// The type returned to the user by 'get<>().
     template <typename opt>
@@ -1077,7 +1084,9 @@ private:
         // +1 here because the first index is the actual option value.
         auto& storage = std::get<index + 1>(tuple);
         if (found<name>()) {
-            if constexpr (opt_by_name<name>::is_flag) storage = true;
+            using opt = opt_by_name<name>;
+            if constexpr (opt::is_flag) storage = true;
+            else if constexpr (is_vector_v<storage_type_t<opt>>) storage = ref_to_storage<name>();
             else storage = std::make_optional(*optvals.template get<name>());
         }
     }
@@ -1085,7 +1094,7 @@ private:
     /// Add all referenced options to a tuple.
     template <typename type, static_string... args>
     auto add_referenced_options(auto& tuple, ref<type, args...>) {
-        [&]<std::size_t ...i>(std::index_sequence<i...>) {
+        [&]<std::size_t... i>(std::index_sequence<i...>) {
             (add_referenced_option<i, nth_str<i, args...>()>(tuple), ...);
         }(std::make_index_sequence<sizeof...(args)>());
     }

@@ -291,6 +291,8 @@ More notes about `ref<>`s:
 - Because it would theoretically be possible to construct cycles, `ref<>` options currently
   cannot reference each other (but conversely, referencing options that are passed after the
   `ref<>` option is perfectly fine).
+- `multiple<>` interacts with `ref<>` as expected; particularly, a `ref<>` referencing another 
+  `multiple<>` will store a vector of the referenced values.
 
 ### Option Type: `flag`
 Flags have no argument. For flags, `get<>()` returns a `bool` that is `true` when they're present, 

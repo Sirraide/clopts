@@ -674,6 +674,89 @@ TEST_CASE("More complex option referencing examples") {
     CHECK((vals[7] == tuple{"h", true, ""}));
 }
 
+TEST_CASE("multiple ref<> referencing a multiple<> option.") {
+    using options = clopts<
+        multiple<option<"-v", "value">>,
+        multiple<option<"--all", "value", ref<std::string, "-v">>>
+    >;
+
+    std::array args = {
+        "test",
+        "--all", "a",
+        "-v", "foo",
+        "--all", "b",
+        "-v", "bar",
+        "--all", "c",
+    };
+
+    using vector = std::vector<std::string>;
+    using tuple = std::tuple<std::string, vector>;
+    auto opts = options::parse(args.size(), args.data(), error_handler);
+    auto vals = opts.get<"-v">();
+    auto all = opts.get<"--all">();
+
+    static_assert(std::is_same_v<
+        std::remove_cvref_t<decltype(vals)>,
+        std::span<std::string>
+    >);
+
+    static_assert(std::is_same_v<
+        std::remove_cvref_t<decltype(all)>,
+        std::span<tuple>
+    >);
+
+    REQUIRE(vals.size() == 2);
+    CHECK(vals[0] == "foo");
+    CHECK(vals[1] == "bar");
+
+    REQUIRE(all.size() == 3);
+    CHECK((all[0] == tuple{"a", vector{}}));
+    CHECK((all[1] == tuple{"b", vector{"foo"}}));
+    CHECK((all[2] == tuple{"c", vector{"foo", "bar"}}));
+}
+
+
+TEST_CASE("ref<> referencing a multiple<> option.") {
+    using options = clopts<
+        multiple<option<"-v", "value">>,
+        option<"--all", "value", ref<std::string, "-v">>
+    >;
+
+    std::array args1 = {
+        "test",
+        "--all", "a",
+        "-v", "foo",
+    };
+
+    std::array args2 = {
+        "test",
+        "-v", "foo",
+        "-v", "bar",
+        "--all", "a",
+    };
+
+    using vector = std::vector<std::string>;
+    using tuple = std::tuple<std::string, vector>;
+    auto opts1 = options::parse(args1.size(), args1.data(), error_handler);
+    auto opts2 = options::parse(args2.size(), args2.data(), error_handler);
+
+    auto vals1 = opts1.get<"-v">();
+    auto vals2 = opts2.get<"-v">();
+    auto all1 = opts1.get<"--all">();
+    auto all2 = opts2.get<"--all">();
+
+    REQUIRE(vals1.size() == 1);
+    REQUIRE(vals2.size() == 2);
+    REQUIRE(vals1[0] == "foo");
+    REQUIRE(vals2[0] == "foo");
+    REQUIRE(vals2[1] == "bar");
+    REQUIRE(all1);
+    REQUIRE(all2);
+
+    CHECK((*all1 == tuple{"a", vector{}}));
+    CHECK((*all2 == tuple{"a", vector{"foo", "bar"}}));
+}
+
 TEST_CASE("Documentation compiles (example 1)") {
     using options = clopts<
         option<"--repeat", "How many times the output should be repeated (default 1)", int64_t>,
