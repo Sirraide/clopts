@@ -306,7 +306,7 @@ struct string_or_int {
 
     constexpr string_or_int(std::int64_t integer)
         : integer{integer}
-    , is_integer{true} {}
+        , is_integer{true} {}
 };
 
 string_or_int(std::int64_t) -> string_or_int<1>;
@@ -430,9 +430,6 @@ struct opt_impl {
     /// Single element type with vector readded.
     using canonical_type = std::conditional_t<is_vector_v<actual_type>, std::vector<single_element_type>, single_element_type>;
 
-    /// The type used to store the result of the option. This is either
-    /// the simple type or a std::vector<> thereof.
-
     /// Make sure this is a valid option.
     static_assert(sizeof _description.arr < 512, "Description may not be longer than 512 characters");
     static_assert(_name.len > 0, "Option name may not be empty");
@@ -447,9 +444,11 @@ struct opt_impl {
     static constexpr decltype(_description) description = _description;
     static constexpr bool is_flag = std::is_same_v<canonical_type, bool>;
     static constexpr bool is_values = is_values_type_t<actual_type_base>;
+    static constexpr bool is_ref = option_type<actual_type_base>::is_ref;
     static constexpr bool is_required = required;
     static constexpr bool is_overridable = overridable;
     static constexpr bool option_tag = true;
+    static_assert(not is_flag or not is_ref, "Flags cannot reference other options"); // TODO: Allow this?
 
     static constexpr bool is_valid_option_value(
         const single_element_type& val
@@ -612,6 +611,48 @@ class clopts_impl<list<opts...>, list<special...>> {
     clopts_impl& operator=(clopts_impl&& o) = delete;
 
     /// =======================================================================
+    ///  Option access by name.
+    /// =======================================================================
+    /// Option names.
+    static constexpr std::array<const char*, sizeof...(opts)> opt_names{opts::name.arr...};
+
+    /// Get the index of an option.
+    template <size_t index, static_string option>
+    static constexpr size_t optindex_impl() {
+        if constexpr (index >= sizeof...(opts)) return index;
+        else if constexpr (CLOPTS_STRCMP(opt_names[index], option.arr) == 0) return index;
+        else return optindex_impl<index + 1, option>();
+    }
+
+#if __cpp_static_assert >= 202306L
+    template <static_string option>
+    static consteval auto format_invalid_option_name() -> static_string<option.size() + 45> {
+        static_string<option.size() + 45> ret;
+        ret.append("There is no option with the name '");
+        ret.append(option.data(), option.size());
+        ret.append("'");
+        return ret;
+    }
+#endif
+
+    template <bool ok, static_string option>
+    static consteval void assert_valid_option_name() {
+#if __cpp_static_assert >= 202306L
+        static_assert(ok, format_invalid_option_name<option>());
+#else
+        static_assert(ok, "Invalid option name. You've probably misspelt an option.");
+#endif
+    }
+
+    /// Get the index of an option and raise an error if the option is not found.
+    template <static_string option>
+    static constexpr size_t optindex() {
+        constexpr size_t sz = optindex_impl<0, option>();
+        assert_valid_option_name<(sz < sizeof...(opts)), option>();
+        return sz;
+    }
+
+    /// =======================================================================
     ///  Validation.
     /// =======================================================================
     static_assert(sizeof...(opts) > 0, "At least one option is required");
@@ -679,7 +720,7 @@ class clopts_impl<list<opts...>, list<special...>> {
                 opts::name == str and
                 // And that option must not also be a ref<> option; this is to
                 // prevent cycles.
-                not option_type<typename opts::actual_type_base>::is_ref
+                not opts::is_ref
             ) or ...);
         };
         return (ValidateReference.template operator()<references>() and ...);
@@ -690,7 +731,7 @@ class clopts_impl<list<opts...>, list<special...>> {
         bool ok = true;
         While<opts...>(ok, [&]<typename opt> {
             using type = typename opt::actual_type_base;
-            if constexpr (option_type<type>::is_ref) ok = validate_references_impl(type{});
+            if constexpr (opt::is_ref) ok = validate_references_impl(type{});
         });
         return ok;
     }
@@ -700,9 +741,70 @@ class clopts_impl<list<opts...>, list<special...>> {
     static_assert(validate_multiple() <= 1, "Cannot have more than one multiple<positional<>> option");
     static_assert(validate_references(), "All options with a ref<> type must reference an existing non-ref option");
 
+    /// Get an option by name.
+    // TODO: Use pack indexing once the syntax is fixed and compilers
+    // have actually started defining __cpp_pack_indexing.
+    template <static_string name>
+    using opt_by_name = std::tuple_element_t<optindex<name>(), std::tuple<opts...>>;
+
+    // I hate not having pack indexing.
+    template <std::size_t i, static_string str, static_string ...strs>
+    static constexpr auto nth_str() {
+        if constexpr (i == 0) return str;
+        else return nth_str<i - 1, strs...>();
+    }
+
+    template <typename opt>
+    struct storage_type;
+
+    template <typename, typename>
+    struct compute_ref_storage_type {
+        using type = void;
+    };
+
+    template <typename actual_type, typename actual_type_base, static_string... args>
+    struct compute_ref_storage_type<actual_type, ref<actual_type_base, args...>> {
+        using tuple = std::tuple<
+            option_type_t<actual_type_base>,
+            std::conditional_t< // FIXME: Duplicated code between this and get_return_type.
+                std::is_same_v<typename storage_type<opt_by_name<args>>::type, bool>,
+                bool,
+                std::optional<typename storage_type<opt_by_name<args>>::type>
+            >...
+        >;
+
+        using type = std::conditional_t<is_vector_v<actual_type>, std::vector<tuple>, tuple>;
+    };
+
+    /// Helper to determine the type used to store an option value.
+    ///
+    /// This is usually just the canonical type, but for options that
+    /// reference other options, we need to add all the references as
+    /// well.
+    template <typename opt>
+    struct storage_type {
+        using type = std::conditional_t<
+            opt::is_ref,
+            typename compute_ref_storage_type<typename opt::actual_type, typename opt::actual_type_base>::type,
+            typename opt::canonical_type>;
+    };
+
+    template <typename opt>
+    using storage_type_t = typename storage_type<opt>::type;
+
+    template <typename opt>
+    using single_element_storage_type_t = remove_vector_t<storage_type_t<opt>>;
+
+    /// The type returned to the user by 'get<>().
+    template <typename opt>
+    using get_return_type = std::conditional_t<
+        std::is_same_v<typename opt::canonical_type, bool>,
+        bool,
+        storage_type_t<opt>*>;
+
     /// Various types.
     using help_string_t = static_string<1024 * sizeof...(opts)>;
-    using optvals_tuple_t = std::tuple<typename opts::canonical_type...>;
+    using optvals_tuple_t = std::tuple<storage_type_t<opts>...>;
     using string = std::string;
     using integer = int64_t;
 
@@ -733,46 +835,6 @@ private:
         return buffer;
     }
 
-    /// Get the index of an option.
-    template <size_t index, static_string option>
-    static constexpr size_t optindex_impl() {
-        if constexpr (index >= sizeof...(opts)) return index;
-        else if constexpr (CLOPTS_STRCMP(opt_names[index], option.arr) == 0) return index;
-        else return optindex_impl<index + 1, option>();
-    }
-
-#if __cpp_static_assert >= 202306L
-    template <static_string option>
-    static consteval auto format_invalid_option_name() -> static_string<option.size() + 45> {
-        static_string<option.size() + 45> ret;
-        ret.append("There is no option with the name '");
-        ret.append(option.data(), option.size());
-        ret.append("'");
-        return ret;
-    }
-#endif
-
-    template <bool ok, static_string option>
-    static consteval void assert_valid_option_name() {
-#if __cpp_static_assert >= 202306L
-        static_assert(ok, format_invalid_option_name<option>());
-#else
-        static_assert(ok, "Invalid option name. You've probably misspelt an option.");
-#endif
-    }
-
-    /// Get the index of an option and raise an error if the option is not found.
-    template <static_string option>
-    static constexpr size_t optindex() {
-        constexpr size_t sz = optindex_impl<0, option>();
-        assert_valid_option_name<(sz < sizeof...(opts)), option>();
-        return sz;
-    }
-
-    /// Get the type of an option value.
-    template <static_string s>
-    using optval_t = std::remove_cvref_t<decltype(std::get<optindex<s>()>(std::declval<optvals_tuple_t>()))>;
-
 public:
     /// Result type.
     class optvals_type {
@@ -783,17 +845,17 @@ public:
 
         /// This implements get<>() and get_or<>().
         template <static_string s>
-        constexpr auto get_impl() -> std::conditional_t<std::is_same_v<optval_t<s>, bool>, bool, optval_t<s>*> {
-            using value_type = optval_t<s>;
+        constexpr auto get_impl() -> get_return_type<opt_by_name<s>> {
+            using canonical = typename opt_by_name<s>::canonical_type;
 
             /// Bool options don’t have a value. Instead, we just return whether the option was found.
-            if constexpr (std::is_same_v<value_type, bool>) return opts_found[optindex<s>()];
+            if constexpr (std::is_same_v<canonical, bool>) return opts_found[optindex<s>()];
 
             /// We always return a pointer to vector options because the user can just check if it’s empty.
-            else if constexpr (detail::is_vector_v<value_type>) return std::addressof(std::get<optindex<s>()>(optvals));
+            else if constexpr (detail::is_vector_v<canonical>) return std::addressof(std::get<optindex<s>()>(optvals));
 
             /// Function options don’t have a value.
-            else if constexpr (detail::is_callback<value_type>) CLOPTS_ERR("Cannot call get<>() on an option with function type.");
+            else if constexpr (detail::is_callback<canonical>) CLOPTS_ERR("Cannot call get<>() on an option with function type.");
 
             /// Otherwise, return nullptr if the option wasn’t found, and a pointer to the value otherwise.
             else return not opts_found[optindex<s>()] ? nullptr : std::addressof(std::get<optindex<s>()>(optvals));
@@ -854,9 +916,6 @@ public:
     };
 
 private:
-    /// Option names.
-    static constexpr std::array<const char*, sizeof...(opts)> opt_names{opts::name.arr...};
-
     /// Variables for the parser and for storing parsed options.
     optvals_type optvals{};
     bool has_error = false;
@@ -876,7 +935,7 @@ private:
 
     /// Get a reference to an option value.
     template <static_string s>
-    [[nodiscard]] constexpr auto ref() -> decltype(std::get<optindex<s>()>(optvals.optvals))& {
+    [[nodiscard]] constexpr auto ref_to_storage() -> decltype(std::get<optindex<s>()>(optvals.optvals))& {
         using value_type = decltype(std::get<optindex<s>()>(optvals.optvals));
 
         /// Bool options don’t have a value.
@@ -1000,6 +1059,42 @@ private:
         if (argv) return argv[0];
         return {};
     }
+    /// Store an option value.
+    template <bool is_multiple>
+    void store_option_value(auto& ref, auto value) {
+        /// Set the value.
+        if constexpr (is_multiple) ref.push_back(std::move(value));
+        else ref = std::move(value);
+    }
+
+    /// Add a referenced option to a tuple.
+    template <std::size_t index, static_string name>
+    void add_referenced_option(auto& tuple) {
+        // +1 here because the first index is the actual option value.
+        auto& storage = std::get<index + 1>(tuple);
+        if (found<name>()) {
+            if constexpr (opt_by_name<name>::is_flag) storage = true;
+            else storage = std::make_optional(*optvals.template get<name>());
+        }
+    }
+
+    /// Add all referenced options to a tuple.
+    template <typename type, static_string... args>
+    auto add_referenced_options(auto& tuple, ref<type, args...>) {
+        [&]<std::size_t ...i>(std::index_sequence<i...>) {
+            (add_referenced_option<i, nth_str<i, args...>()>(tuple), ...);
+        }(std::make_index_sequence<sizeof...(args)>());
+    }
+
+    /// Collect all references referenced by an optio.
+    template <typename opt>
+    auto collect_references(auto value) {
+        using tuple_ty = single_element_storage_type_t<opt>;
+        tuple_ty tuple;
+        std::get<0>(tuple) = std::move(value);
+        add_referenced_options(tuple, typename opt::actual_type_base{});
+        return tuple;
+    }
 
     /// Handle an option value.
     template <typename opt, bool is_multiple>
@@ -1034,11 +1129,16 @@ private:
                 }
             }
 
-            /// If this value references other options, add their values too.
-
-            /// Set the value.
-            if constexpr (is_multiple) ref<opt::name>().push_back(std::move(value));
-            else ref<opt::name>() = std::move(value);
+            /// If this is a ref<> option, remember to unwrap it first.
+            auto& storage = ref_to_storage<opt::name>();
+            if constexpr (opt::is_ref) {
+                store_option_value<is_multiple>(
+                    storage,
+                    collect_references<opt>(std::move(value))
+                );
+            } else {
+                store_option_value<is_multiple>(storage, std::move(value));
+            }
         }
     }
 
@@ -1373,8 +1473,8 @@ using clopts = detail::clopts_impl< // clang-format off
 >; // clang-format on
 
 /// Types.
-using detail::values;
 using detail::ref;
+using detail::values;
 
 /// Base option type.
 template <

@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <fstream>
+#include <tuple>
 
 using namespace command_line_options;
 using namespace Catch::literals;
@@ -613,6 +614,77 @@ TEST_CASE("Overridable options work") {
 
     CHECK(*opts1.get<"-x">() == "c");
     CHECK(*opts2.get<"-x">() == "c");
+}
+
+TEST_CASE("Options can reference other options") {
+    using options = clopts<
+        overridable<"-x", "type">,
+        multiple<option<"-y", "tagged", ref<std::string, "-x", "-x">>>
+    >;
+
+    std::array args = {
+        "test",
+        "-y", "x",
+        "-x", "1",
+        "-y", "4"
+    };
+
+    auto opts = options::parse(args.size(), args.data(), error_handler);
+
+    using tuple = std::tuple<
+        std::string,
+        std::optional<std::string>,
+        std::optional<std::string>
+    >;
+    static_assert(__is_same(
+        std::remove_cvref_t<decltype(*opts.get<"-y">())>,
+        std::vector<tuple>
+    ));
+
+    auto& vals = *opts.get<"-y">();
+    REQUIRE(vals.size() == 2);
+    CHECK((vals[0] == tuple{"x", std::nullopt, std::nullopt}));
+    CHECK((vals[1] == tuple{"4", "1", "1"}));
+}
+
+TEST_CASE("More complex option referencing examples") {
+    std::array args = {
+        "test",
+        "-v", "a",
+        "-v", "b",
+        "--flag",
+        "-v", "c",
+        "-x", "foo",
+        "-v", "d",
+        "-v", "e",
+        "-x", "bar",
+        "-v", "f",
+        "-v", "g",
+        "-x", "",
+        "-v", "h",
+    };
+
+    using options = clopts<
+        flag<"--flag", "flag">,
+        overridable<"-x", "switch">,
+        multiple<option<"-v", "value", ref<std::string, "--flag", "-x">>>
+    >;
+
+    auto opts = options::parse(args.size(), args.data(), error_handler);
+    auto& vals = *opts.get<"-v">();
+
+    using tuple = std::tuple<std::string, bool, std::optional<std::string>>;
+    static_assert(std::is_same_v<std::remove_cvref_t<decltype(vals)>, std::vector<tuple>>);
+
+    REQUIRE(vals.size() == 8);
+    CHECK((vals[0] == tuple{"a", false, std::nullopt}));
+    CHECK((vals[1] == tuple{"b", false, std::nullopt}));
+    CHECK((vals[2] == tuple{"c", true, std::nullopt}));
+    CHECK((vals[3] == tuple{"d", true, "foo"}));
+    CHECK((vals[4] == tuple{"e", true, "foo"}));
+    CHECK((vals[5] == tuple{"f", true, "bar"}));
+    CHECK((vals[6] == tuple{"g", true, "bar"}));
+    CHECK((vals[7] == tuple{"h", true, ""}));
 }
 
 TEST_CASE("Documentation compiles (example 1)") {
