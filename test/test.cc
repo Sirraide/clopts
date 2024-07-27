@@ -272,12 +272,12 @@ TEST_CASE("Multiple positional values<> work") {
         REQUIRE(opts1.get<"format">().size() == 3);
         REQUIRE(opts2.get<"format">().size() == 3);
 
-        CHECK(opts1.get<"format">().at(0) == "foo");
-        CHECK(opts1.get<"format">().at(1) == "bar");
-        CHECK(opts1.get<"format">().at(2) == "foo");
-        CHECK(opts2.get<"format">().at(0) == 0);
-        CHECK(opts2.get<"format">().at(1) == 1);
-        CHECK(opts2.get<"format">().at(2) == 1);
+        CHECK(opts1.get<"format">()[0] == "foo");
+        CHECK(opts1.get<"format">()[1] == "bar");
+        CHECK(opts1.get<"format">()[2] == "foo");
+        CHECK(opts2.get<"format">()[0] == 0);
+        CHECK(opts2.get<"format">()[1] == 1);
+        CHECK(opts2.get<"format">()[2] == 1);
     }
 
     SECTION("Invalid values raise an error") {
@@ -374,10 +374,10 @@ TEST_CASE("Multiple meta-option") {
     CHECK(opts.get<"--int">().size() == 2);
     CHECK(opts.get<"--string">().size() == 2);
 
-    CHECK(opts.get<"--int">().at(0) == 1);
-    CHECK(opts.get<"--int">().at(1) == 2);
-    CHECK(opts.get<"--string">().at(0) == "foo");
-    CHECK(opts.get<"--string">().at(1) == "bar");
+    CHECK(opts.get<"--int">()[0] == 1);
+    CHECK(opts.get<"--int">()[1] == 2);
+    CHECK(opts.get<"--string">()[0] == "foo");
+    CHECK(opts.get<"--string">()[1] == "bar");
 }
 
 TEST_CASE("Multiple + Positional works") {
@@ -406,12 +406,12 @@ TEST_CASE("Multiple + Positional works") {
     CHECK(opts.get<"--string">().size() == 2);
     CHECK(opts.get<"rest">().size() == 2);
 
-    CHECK(opts.get<"--int">().at(0) == 1);
-    CHECK(opts.get<"--int">().at(1) == 2);
-    CHECK(opts.get<"--string">().at(0) == "foo");
-    CHECK(opts.get<"--string">().at(1) == "bar");
-    CHECK(opts.get<"rest">().at(0) == "baz");
-    CHECK(opts.get<"rest">().at(1) == "qux");
+    CHECK(opts.get<"--int">()[0] == 1);
+    CHECK(opts.get<"--int">()[1] == 2);
+    CHECK(opts.get<"--string">()[0] == "foo");
+    CHECK(opts.get<"--string">()[1] == "bar");
+    CHECK(opts.get<"rest">()[0] == "baz");
+    CHECK(opts.get<"rest">()[1] == "qux");
 }
 
 TEST_CASE("Calling from main() works as expected") {
@@ -480,8 +480,8 @@ TEST_CASE("stop_parsing<> option") {
 
         auto opts = options::parse(args.size(), args.data(), error_handler);
         REQUIRE(opts.get<"--foo">().size() == 2);
-        CHECK(opts.get<"--foo">().at(0) == "arg");
-        CHECK(opts.get<"--foo">().at(1) == "stop");
+        CHECK(opts.get<"--foo">()[0] == "arg");
+        CHECK(opts.get<"--foo">()[1] == "stop");
         CHECK(not opts.get<"--bar">());
 
         auto unprocessed = opts.unprocessed();
@@ -508,7 +508,7 @@ TEST_CASE("stop_parsing<> option") {
 
         auto opts = options::parse(args.size(), args.data(), error_handler);
         REQUIRE(opts.get<"--foo">().size() == 1);
-        CHECK(opts.get<"--foo">().at(0) == "arg");
+        CHECK(opts.get<"--foo">()[0] == "arg");
         CHECK(opts.unprocessed().empty());
     }
 
@@ -522,7 +522,7 @@ TEST_CASE("stop_parsing<> option") {
 
         auto opts = options::parse(args.size(), args.data(), error_handler);
         REQUIRE(opts.get<"--foo">().size() == 1);
-        CHECK(opts.get<"--foo">().at(0) == "arg");
+        CHECK(opts.get<"--foo">()[0] == "arg");
         CHECK(opts.unprocessed().empty());
     }
 
