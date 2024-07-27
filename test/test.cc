@@ -623,10 +623,10 @@ TEST_CASE("Options can reference other options") {
         std::optional<std::string>,
         std::optional<std::string>
     >;
-    static_assert(__is_same(
+    static_assert(std::is_same_v<
         std::remove_cvref_t<decltype(opts.get<"-y">())>,
         std::span<tuple>
-    ));
+    >);
 
     auto vals = opts.get<"-y">();
     REQUIRE(vals.size() == 2);
