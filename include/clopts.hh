@@ -149,8 +149,8 @@ template <typename T>
 concept is_callback = is<T,
     callback_arg_type,
     callback_noarg_type,
-    std::vector<detail::callback_arg_type>,
-    std::vector<detail::callback_noarg_type>
+    std::vector<callback_arg_type>,
+    std::vector<callback_noarg_type>
 >;
 
 /// Check if an option type takes an argument.
@@ -219,7 +219,7 @@ struct make_lambda_s<cb> {
 template <auto cb>
 using make_lambda = make_lambda_s<cb>; // clang-format on
 
-template <typename first, typename... rest>
+template <typename first, typename...>
 struct first_type {
     using type = first;
 };
@@ -299,7 +299,7 @@ static_string(const char (&)[sz]) -> static_string<sz>;
 
 template <std::size_t size>
 struct string_or_int {
-    detail::static_string<size> s{};
+    static_string<size> s{};
     std::int64_t integer{};
     bool is_integer{};
 
@@ -353,7 +353,7 @@ struct values_impl {
             }
         };
         return (append.template operator()<data>() + ...) + (sizeof...(data) - 1) * 2;
-    };
+    }
 };
 
 template <string_or_int... data>
@@ -399,7 +399,8 @@ template <
     static_string _name,
     static_string _description,
     typename ty_param,
-    bool required>
+    bool required,
+    bool overridable>
 struct opt_impl {
     /// There are four possible cases we need to handle here:
     ///   - Simple type: std::string, int64_t, ...
@@ -430,12 +431,13 @@ struct opt_impl {
         "Option type must be std::string, bool, int64_t, double, file_data, values<>, or callback"
     );
 
-    static constexpr inline decltype(_name) name = _name;
-    static constexpr inline decltype(_description) description = _description;
-    static constexpr inline bool is_flag = std::is_same_v<type, bool>;
-    static constexpr inline bool is_values = is_values_type_t<actual_type_base>;
-    static constexpr inline bool is_required = required;
-    static constexpr inline bool option_tag = true;
+    static constexpr decltype(_name) name = _name;
+    static constexpr decltype(_description) description = _description;
+    static constexpr bool is_flag = std::is_same_v<type, bool>;
+    static constexpr bool is_values = is_values_type_t<actual_type_base>;
+    static constexpr bool is_required = required;
+    static constexpr bool is_overridable = overridable;
+    static constexpr bool option_tag = true;
 
     static constexpr bool is_valid_option_value(
         const simple_type& val
@@ -538,10 +540,8 @@ template <typename... pack>
 constexpr void While(bool& cond, auto&& lambda) {
     auto impl = [&]<typename t>() -> bool {
         if (not cond) return false;
-        else {
-            lambda.template operator()<t>();
-            return true;
-        }
+        lambda.template operator()<t>();
+        return true;
     };
 
     (impl.template operator()<pack>() and ...);
@@ -664,7 +664,7 @@ class clopts_impl<list<opts...>, list<special...>> {
     static_assert(validate_multiple() <= 1, "Cannot have more than one multiple<positional<>> option");
 
     /// Various types.
-    using help_string_t = detail::static_string<1024 * sizeof...(opts)>;
+    using help_string_t = static_string<1024 * sizeof...(opts)>;
     using optvals_tuple_t = std::tuple<typename opts::type...>;
     using string = std::string;
     using integer = int64_t;
@@ -680,8 +680,8 @@ private:
     /// =======================================================================
     /// Get the name of an option type.
     template <typename t>
-    static consteval auto type_name() -> detail::static_string<25> {
-        detail::static_string<25> buffer;
+    static consteval auto type_name() -> static_string<25> {
+        static_string<25> buffer;
         if constexpr (detail::is<t, string>) buffer.append("string");
         else if constexpr (detail::is<t, bool>) buffer.append("bool");
         else if constexpr (detail::is<t, integer, double>) buffer.append("number");
@@ -697,7 +697,7 @@ private:
     }
 
     /// Get the index of an option.
-    template <size_t index, detail::static_string option>
+    template <size_t index, static_string option>
     static constexpr size_t optindex_impl() {
         if constexpr (index >= sizeof...(opts)) return index;
         else if constexpr (CLOPTS_STRCMP(opt_names[index], option.arr) == 0) return index;
@@ -705,9 +705,9 @@ private:
     }
 
 #if __cpp_static_assert >= 202306L
-    template <detail::static_string option>
-    static consteval auto format_invalid_option_name() -> detail::static_string<option.size() + 45> {
-        detail::static_string<option.size() + 45> ret;
+    template <static_string option>
+    static consteval auto format_invalid_option_name() -> static_string<option.size() + 45> {
+        static_string<option.size() + 45> ret;
         ret.append("There is no option with the name '");
         ret.append(option.data(), option.size());
         ret.append("'");
@@ -715,7 +715,7 @@ private:
     }
 #endif
 
-    template <bool ok, detail::static_string option>
+    template <bool ok, static_string option>
     static consteval void assert_valid_option_name() {
 #if __cpp_static_assert >= 202306L
         static_assert(ok, format_invalid_option_name<option>());
@@ -725,7 +725,7 @@ private:
     }
 
     /// Get the index of an option and raise an error if the option is not found.
-    template <detail::static_string option>
+    template <static_string option>
     static constexpr size_t optindex() {
         constexpr size_t sz = optindex_impl<0, option>();
         assert_valid_option_name<(sz < sizeof...(opts)), option>();
@@ -733,7 +733,7 @@ private:
     }
 
     /// Get the type of an option value.
-    template <detail::static_string s>
+    template <static_string s>
     using optval_t = std::remove_cvref_t<decltype(std::get<optindex<s>()>(std::declval<optvals_tuple_t>()))>;
 
 public:
@@ -745,7 +745,7 @@ public:
         std::conditional_t<has_stop_parsing, std::span<const char*>, empty> unprocessed_args{};
 
         /// This implements get<>() and get_or<>().
-        template <detail::static_string s>
+        template <static_string s>
         constexpr auto get_impl() -> std::conditional_t<std::is_same_v<optval_t<s>, bool>, bool, optval_t<s>*> {
             using value_type = optval_t<s>;
 
@@ -773,7 +773,7 @@ public:
         /// \return a pointer to the value if the option was found
         ///
         /// \see get_or()
-        template <detail::static_string s>
+        template <static_string s>
         constexpr auto get() {
             /// Check if the option exists before calling get_impl<>() so we trigger the static_assert
             /// below before hitting a complex template instantiation error.
@@ -791,12 +791,12 @@ public:
         /// \return a copy of the option value if the option was found.
         ///
         /// \see get()
-        template <detail::static_string s>
+        template <static_string s>
         constexpr auto get_or(auto default_) {
             constexpr auto sz = optindex_impl<0, s>();
             if constexpr (sz < sizeof...(opts)) {
                 if (opts_found[optindex<s>()]) return *get_impl<s>();
-                else return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(default_);
+                return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(default_);
             } else {
                 assert_valid_option_name<(sz < sizeof...(opts)), s>();
             }
@@ -818,7 +818,7 @@ public:
 
 private:
     /// Option names.
-    static constexpr inline std::array<const char*, sizeof...(opts)> opt_names{opts::name.arr...};
+    static constexpr std::array<const char*, sizeof...(opts)> opt_names{opts::name.arr...};
 
     /// Variables for the parser and for storing parsed options.
     optvals_type optvals{};
@@ -830,15 +830,15 @@ private:
     error_handler_t error_handler{};
 
     /// Check if an option was found.
-    template <detail::static_string option>
+    template <static_string option>
     bool found() { return optvals.opts_found[optindex<option>()]; }
 
     /// Mark an option as found.
-    template <detail::static_string option>
+    template <static_string option>
     void set_found() { optvals.opts_found[optindex<option>()] = true; }
 
     /// Get a reference to an option value.
-    template <detail::static_string s>
+    template <static_string s>
     [[nodiscard]] constexpr auto ref() -> decltype(std::get<optindex<s>()>(optvals.optvals))& {
         using value_type = decltype(std::get<optindex<s>()>(optvals.optvals));
 
@@ -946,10 +946,10 @@ private:
 
         /// Return the combined help message.
         return msg;
-    }; // clang-format on
+    } // clang-format on
 
     /// Help message is created at compile time.
-    static constexpr inline help_string_t help_message_raw = make_help_message();
+    static constexpr help_string_t help_message_raw = make_help_message();
 
 public:
     /// Get the help message.
@@ -961,7 +961,7 @@ private:
     /// Get the program name, if available.
     auto program_name() const -> std::string_view {
         if (argv) return argv[0];
-        else return {};
+        return {};
     }
 
     /// Handle an option value.
@@ -974,7 +974,7 @@ private:
 
         /// If this is a function option, simply call the callback and we're done.
         if constexpr (detail::is_callback<opt_type>) {
-            if constexpr (detail::is<opt_type, detail::callback_noarg_type>) opt::callback(user_data, opt_str);
+            if constexpr (detail::is<opt_type, callback_noarg_type>) opt::callback(user_data, opt_str);
             else opt::callback(user_data, opt_str, opt_val);
         }
 
@@ -1052,7 +1052,7 @@ private:
         }
 
         std::exit(1);
-    };
+    }
 
     /// Invoke the error handler and set the error flag.
     void handle_error(auto first, auto&&... msg_parts) {
@@ -1065,7 +1065,7 @@ private:
     }
 
     /// Helper to parse an integer or double.
-    template <typename number_type, detail::static_string name>
+    template <typename number_type, static_string name>
     auto parse_number(std::string_view s, auto parse_func) -> number_type {
         number_type i{};
 
@@ -1086,8 +1086,8 @@ private:
 
     /// Parse an option value.
     template <typename type>
-    detail::base_type_t<type> make_arg(std::string_view opt_val) {
-        using base_type = detail::base_type_t<type>;
+    base_type_t<type> make_arg(std::string_view opt_val) {
+        using base_type = base_type_t<type>;
 
         /// Make sure this option takes an argument.
         if constexpr (not detail::has_argument<base_type>) CLOPTS_ERR("This option type does not take an argument");
@@ -1131,26 +1131,24 @@ private:
         }
 
         /// Handle the option. If we get here, we know that the option name that we’ve
-        /// encountered matches the option name exactly.
+        /// encountered matches the option name exactly. If this is a func option that
+        /// doesn’t take arguments, just call the callback and we’re done.
+        if constexpr (detail::is<opt_type, callback_noarg_type>) {
+            opt::callback(user_data, opt_str);
+            return true;
+        }
+
+        /// Otherwise, try to consume the next argument as the option value.
         else {
-            /// If this is a func option that doesn’t take arguments, just call the callback and we’re done.
-            if constexpr (detail::is<opt_type, detail::callback_noarg_type>) {
-                opt::callback(user_data, opt_str);
-                return true;
+            /// No more command line arguments left.
+            if (++argi == argc) {
+                handle_error("Missing argument for option \"", opt_str, "\"");
+                return false;
             }
 
-            /// Otherwise, try to consume the next argument as the option value.
-            else {
-                /// No more command line arguments left.
-                if (++argi == argc) {
-                    handle_error("Missing argument for option \"", opt_str, "\"");
-                    return false;
-                }
-
-                /// Parse the argument.
-                dispatch_option_with_arg<opt, is_multiple>(opt_str, argv[argi]);
-                return true;
-            }
+            /// Parse the argument.
+            dispatch_option_with_arg<opt, is_multiple>(opt_str, argv[argi]);
+            return true;
         }
     }
 
@@ -1161,7 +1159,7 @@ private:
         if (not opt_str.starts_with(opt::name.sv())) return false;
 
         /// Check if this option accepts multiple values.
-        using base_type = detail::base_type_t<typename opt::type>;
+        using base_type = base_type_t<typename opt::type>;
         static constexpr bool is_multiple = requires { opt::is_multiple; };
         if constexpr (not is_multiple and not detail::is_callback<base_type>) {
             /// Duplicate options are not allowed by default.
@@ -1225,7 +1223,7 @@ private:
         };
 
         return (handle.template operator()<opts>(opt_str) or ...);
-    };
+    }
 
     /// Invoke handle_positional_impl on every option until one returns true.
     bool handle_positional(std::string_view opt_str) {
@@ -1236,7 +1234,7 @@ private:
         };
 
         return (handle.template operator()<opts>(opt_str) or ...);
-    };
+    }
 
     /// Check if we should stop parsing.
     template <typename opt>
@@ -1343,8 +1341,9 @@ template <
     detail::static_string _name,
     detail::static_string _description = "",
     typename type = std::string,
-    bool required = false>
-struct option : detail::opt_impl<_name, _description, type, required> {};
+    bool required = false,
+    bool overridable = false>
+struct option : detail::opt_impl<_name, _description, type, required, overridable> {};
 
 namespace experimental {
 /// Base short option type.
@@ -1352,14 +1351,15 @@ template <
     detail::static_string _name,
     detail::static_string _description = "",
     typename _type = std::string,
-    bool required = false>
-struct short_option : detail::opt_impl<_name, _description, _type, required> {
-    static constexpr inline decltype(_name) name = _name;
-    static constexpr inline decltype(_description) description = _description;
-    static constexpr inline bool is_flag = std::is_same_v<_type, bool>;
-    static constexpr inline bool is_required = required;
-    static constexpr inline bool is_short = true;
-    static constexpr inline bool option_tag = true;
+    bool required = false,
+    bool overridable = false>
+struct short_option : detail::opt_impl<_name, _description, _type, required, overridable> {
+    static constexpr decltype(_name) name = _name;
+    static constexpr decltype(_description) description = _description;
+    static constexpr bool is_flag = std::is_same_v<_type, bool>;
+    static constexpr bool is_required = required;
+    static constexpr bool is_short = true;
+    static constexpr bool option_tag = true;
 
     constexpr short_option() = delete;
 };
@@ -1374,7 +1374,6 @@ struct file {
     using element_pointer = std::add_pointer_t<element_type>;
     static constexpr bool is_file_data = true;
 
-public:
     /// The file path.
     path_type path;
 
@@ -1402,7 +1401,7 @@ template <
     typename lambda,
     bool required = false>
 struct func_impl : option<_name, _description, typename lambda::type, required> {
-    static constexpr inline typename lambda::lambda callback = {};
+    static constexpr typename lambda::lambda callback = {};
 };
 
 /// A function option.
@@ -1419,13 +1418,13 @@ struct func : func_impl<_name, _description, detail::make_lambda<cb>, required> 
 template <
     detail::static_string _name,
     detail::static_string _description = "">
-struct flag : option<_name, _description, bool, false> {};
+struct flag : option<_name, _description, bool> {};
 
 /// The help option.
 template <auto _help_cb = detail::default_help_handler>
 struct help : func<"--help", "Print this help information", [] {}> {
     static constexpr decltype(_help_cb) help_callback = _help_cb;
-    static constexpr inline bool is_help_option = true;
+    static constexpr bool is_help_option = true;
 };
 
 /// Multiple meta-option.
@@ -1438,16 +1437,17 @@ struct multiple : option<opt::name, opt::description, std::vector<typename opt::
     static_assert(not detail::is<base_type, detail::callback_noarg_type>, "Type of multiple<> cannot be a callback");
     static_assert(not requires { opt::is_multiple; }, "multiple<multiple<>> is invalid");
     static_assert(not requires { opt::is_stop_parsing; }, "multiple<stop_parsing<>> is invalid");
+    static_assert(not opt::is_overridable, "multiple<> options must not be overridable");
 
     constexpr multiple() = delete;
-    static constexpr inline bool is_multiple = true;
+    static constexpr bool is_multiple = true;
     using is_positional_ = detail::positional_t<opt>;
 };
 
 /// Stop parsing when this option is encountered.
 template <detail::static_string stop_at = "--">
-struct stop_parsing : option<stop_at, "Stop parsing command-line arguments", detail::special_tag, false> {
-    static constexpr inline bool is_stop_parsing = true;
+struct stop_parsing : option<stop_at, "Stop parsing command-line arguments", detail::special_tag> {
+    static constexpr bool is_stop_parsing = true;
 };
 
 } // namespace command_line_options
