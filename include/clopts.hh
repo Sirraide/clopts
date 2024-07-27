@@ -797,10 +797,14 @@ class clopts_impl<list<opts...>, list<special...>> {
 
     /// The type returned to the user by 'get<>().
     template <typename opt>
-    using get_return_type = std::conditional_t<
-        std::is_same_v<typename opt::canonical_type, bool>,
-        bool,
-        storage_type_t<opt>*>;
+    using get_return_type = // clang-format off
+        // For flags, just return a bool.
+        std::conditional_t<is_same<typename opt::canonical_type, bool>, bool,
+        // For multiple<> options, return a span.
+        std::conditional_t<is_vector_v<storage_type_t<opt>>, std::span<single_element_storage_type_t<opt>>,
+        // Otherwise, return a pointer.
+        storage_type_t<opt>*
+    >>; // clang-format on
 
     /// Various types.
     using help_string_t = static_string<1024 * sizeof...(opts)>;
@@ -851,8 +855,8 @@ public:
             /// Bool options don’t have a value. Instead, we just return whether the option was found.
             if constexpr (std::is_same_v<canonical, bool>) return opts_found[optindex<s>()];
 
-            /// We always return a pointer to vector options because the user can just check if it’s empty.
-            else if constexpr (detail::is_vector_v<canonical>) return std::addressof(std::get<optindex<s>()>(optvals));
+            /// We always return a span to multiple<> options because the user can just check if it’s empty.
+            else if constexpr (detail::is_vector_v<canonical>) return std::get<optindex<s>()>(optvals);
 
             /// Function options don’t have a value.
             else if constexpr (detail::is_callback<canonical>) CLOPTS_ERR("Cannot call get<>() on an option with function type.");

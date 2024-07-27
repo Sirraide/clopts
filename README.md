@@ -88,8 +88,8 @@ int main(int argc, char** argv) {
     auto opts = options::parse(argc, argv, nullptr, &number);
 
     auto ints = opts.get<"--int">();
-    if (ints->empty()) std::cout << "No ints!\n";
-    else for (const auto& i : *ints) std::cout << i << "\n";
+    if (ints.empty()) std::cout << "No ints!\n";
+    else for (auto i : ints) std::cout << i << "\n";
 }
 ```
 
@@ -264,9 +264,9 @@ invocation would be
           --type 2 --thing bar
 ```
 
-Here, the content of `"--thing"` (which is a vector because of the `multiple<>`) is
+Here, the content of `"--thing"` (which is a span because of the `multiple<>`) is
 ```c++
-std::vector<
+std::span<
     std::tuple<
         std::string, 
         std::optional<std::int64_t>
@@ -372,8 +372,9 @@ The `multiple` option type can’t be used on its own and instead wraps another 
 ```c++
 multiple<option<"--int", "A number", int64_t>>
 ```
-Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns a pointer to a (possibly empty) `std::vector` of the option result type instead (e.g in the case of the `--int` option above, it will return a `std::vector<int64_t>*`). It never returns `nullptr`. However, 
-`get_or<>()` will still the return default value if the option wasn’t found.
+Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns a (possibly empty) 
+`std::span` of the option result type instead (e.g in the case of the `--int` option above, it will return a 
+`std::span<int64_t>`). However, `get_or<>()` will still the return default value if the option wasn’t found.
 
 #### **Properties**
 * If the wrapped option is marked as required, then it is required to be present at least once.
