@@ -845,8 +845,8 @@ TEST_CASE("Help message is formatted correctly") {
         option<"--str", "Description of parameter --str", std::string>,
         option<"--int", "Description of parameter --int", std::int64_t>,
         flag<"--flag", "Description of parameter --flag">,
-        option<"--int-values", "Description of parameter --int-values", values<1, 2, 3, 4, 5>>,
         option<"--str-values", "Description of parameter --str-values", values<"foo", "bar", "baz">>,
+        option<"--int-values", "Description of parameter --int-values", values<1, 2, 3, 4, 5>>,
         overridable<"--ref", "Description of reference parameter", ref<double, "--int">>,
         help<>
     >;
@@ -854,17 +854,17 @@ TEST_CASE("Help message is formatted correctly") {
     static constexpr auto expected = R"help(<pos> [<int-pos>] [options]
 
 Arguments:
-    <pos>         Description of parameter pos
     <int-pos>     Description of parameter int-pos
+    <pos>         Description of parameter pos
 
 Options:
-    --str         Description of parameter --str
-    --int         Description of parameter --int
     --flag        Description of parameter --flag
-    --int-values  Description of parameter --int-values
-    --str-values  Description of parameter --str-values
-    --ref         Description of reference parameter
     --help        Print this help information
+    --int         Description of parameter --int
+    --int-values  Description of parameter --int-values
+    --ref         Description of reference parameter
+    --str         Description of parameter --str
+    --str-values  Description of parameter --str-values
 
 Supported option values:
     --int-values: 1, 2, 3, 4, 5

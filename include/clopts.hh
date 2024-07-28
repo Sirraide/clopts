@@ -570,6 +570,11 @@ constexpr void While(bool& cond, auto&& lambda) {
     (impl.template operator()<pack>() and ...);
 }
 
+// TODO: Use pack indexing once the syntax is fixed and compilers
+// have actually started defining __cpp_pack_indexing.
+template <std::size_t i, typename... pack>
+using nth_type = std::tuple_element_t<i, std::tuple<pack...>>;
+
 /// Check if an option is a regular option.
 template <typename opt>
 struct regular_option {
@@ -605,6 +610,52 @@ struct filter_impl<cond, list<processed...>> {
 
 template <template <typename> typename cond, typename... types>
 using filter = typename filter_impl<cond, list<>, types...>::type;
+
+/// See that one talk (by Daisy Hollman, I think) about how this works.
+template <template <typename> typename get_key, typename... types>
+struct sort_impl {
+private:
+    static constexpr auto sorter = []<std::size_t ...i>(std::index_sequence<i...>) {
+        static constexpr auto sorted = [] {
+            std::array indices{i...};
+            std::array lookup_table{get_key<types>::value...};
+            std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
+                return lookup_table[a] < lookup_table[b];
+            });
+            return indices;
+        }();
+        return list<nth_type<sorted[i], types...>...>{};
+    };
+
+public:
+    using type = decltype(sorter(std::index_sequence_for<types...>()));
+};
+
+template <template <typename> typename get_key, typename... types>
+struct sort_impl<get_key, list<types...>> {
+    using type = typename sort_impl<get_key, types...>::type;
+};
+
+// Special case because an array of size 0 is not going to work...
+template <template <typename> typename get_key>
+struct sort_impl<get_key, list<>> { using type = list<>; };
+
+/// Sort a type list. The trick here is to sort the indices.
+template <template <typename> typename get_key, typename type_list>
+using sort = typename sort_impl<get_key, type_list>::type;
+
+/// ===========================================================================
+///  Sort/filter helpers.
+/// ===========================================================================
+template <typename opt>
+struct get_option_name {
+    static constexpr std::string_view value = opt::name.sv();
+};
+
+template <typename opt>
+struct is_values_option {
+    static constexpr bool value = opt::is_values;
+};
 
 /// ===========================================================================
 ///  Main implementation.
@@ -757,7 +808,7 @@ class clopts_impl<list<opts...>, list<special...>> {
     // TODO: Use pack indexing once the syntax is fixed and compilers
     // have actually started defining __cpp_pack_indexing.
     template <static_string name>
-    using opt_by_name = std::tuple_element_t<optindex<name>(), std::tuple<opts...>>;
+    using opt_by_name = nth_type<optindex<name>(), opts...>;
 
     // I hate not having pack indexing.
     template <std::size_t i, static_string str, static_string... strs>
@@ -973,13 +1024,19 @@ private:
 
     /// Create the help message.
     static constexpr auto make_help_message() -> help_string_t { // clang-format off
-        using positional = filter<is_positional, opts...>;
-        using non_positional = filter<is_not_positional, opts...>;
+        using positional_unsorted = filter<is_positional, opts...>;
+        using positional = sort<get_option_name, positional_unsorted>;
+        using non_positional = sort<get_option_name, filter<is_not_positional, opts...>>;
+        using values_opts = sort<get_option_name, filter<is_values_option, opts...>>;
         help_string_t msg{};
 
         /// Append the positional options.
+        ///
+        /// Do NOT sort them here as this is where we print in what order
+        /// they’re supposed to appear in, so sorting would be very stupid
+        /// here.
         bool have_positional_opts = false;
-        positional::each([&]<typename opt> {
+        positional_unsorted::each([&]<typename opt> {
             have_positional_opts = true;
             if (not opt::is_required) msg.append("[");
             msg.append("<");
@@ -1067,7 +1124,7 @@ private:
         /// If we have any values<> types, print their supported values.
         if constexpr ((opts::is_values or ...)) {
             msg.append("\nSupported option values:\n");
-            Foreach<opts...>([&] <typename opt> {
+            values_opts::each([&] <typename opt> {
                 if constexpr (opt::is_values) {
                     msg.append("    ");
                     msg.append(opt::name.arr, opt::name.len);
