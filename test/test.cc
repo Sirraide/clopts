@@ -838,6 +838,42 @@ TEST_CASE("Documentation compiles (example 2)") {
     CHECK(out == "3\n42\n");
 }
 
+TEST_CASE("Help message is formatted correctly") {
+    using options = clopts<
+        positional<"pos", "Description of parameter pos">,
+        positional<"int-pos", "Description of parameter int-pos", std::int64_t, false>,
+        option<"--str", "Description of parameter --str", std::string>,
+        option<"--int", "Description of parameter --int", std::int64_t>,
+        flag<"--flag", "Description of parameter --flag">,
+        option<"--int-values", "Description of parameter --int-values", values<1, 2, 3, 4, 5>>,
+        option<"--str-values", "Description of parameter --str-values", values<"foo", "bar", "baz">>,
+        overridable<"--ref", "Description of reference parameter", ref<double, "--int">>,
+        help<>
+    >;
+
+    static constexpr auto expected = R"help(<pos> [<int-pos>] [options]
+
+Arguments:
+    <pos>         Description of parameter pos
+    <int-pos>     Description of parameter int-pos
+
+Options:
+    --str         Description of parameter --str
+    --int         Description of parameter --int
+    --flag        Description of parameter --flag
+    --int-values  Description of parameter --int-values
+    --str-values  Description of parameter --str-values
+    --ref         Description of reference parameter
+    --help        Print this help information
+
+Supported option values:
+    --int-values: 1, 2, 3, 4, 5
+    --str-values: foo, bar, baz
+)help";
+
+    CHECK(options::help() == expected);
+}
+
 /*TEST_CASE("Aliased options are equivalent") {
     using options = clopts<
         multiple<option<"--string", "A string", std::string>>,

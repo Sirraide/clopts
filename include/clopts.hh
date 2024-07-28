@@ -42,6 +42,8 @@ namespace command_line_options {
 ///  Internals.
 /// ===========================================================================
 namespace detail {
+using namespace std::literals;
+
 // clang-format off
 /// Some compilers do not have __builtin_strlen().
 #if defined __GNUC__ || defined __clang__
@@ -98,7 +100,11 @@ constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
 struct empty {};
 
 /// List of types.
-template <typename ...> struct list;
+template <typename ...pack> struct list {
+    static constexpr void each(auto&& lambda) {
+        (lambda.template operator()<pack>(), ...);
+    }
+};
 
 /// Check if two types are the same.
 template <typename a, typename ...bs>
@@ -127,6 +133,12 @@ template <typename t> using remove_vector_t = typename test_vector<t>::type;
 template <typename opt>
 struct is_positional {
     static constexpr bool value = requires {{typename opt::is_positional_{}} -> std::same_as<std::true_type>; };
+    using type = std::bool_constant<value>;
+};
+
+template <typename opt>
+struct is_not_positional {
+    static constexpr bool value = not is_positional<opt>::value;
     using type = std::bool_constant<value>;
 };
 
@@ -543,7 +555,7 @@ static file_data_type map_file(
 /// Iterate over a pack while a condition is true.
 template <typename... pack>
 constexpr void Foreach(auto&& lambda) {
-    (lambda.template operator()<pack>(), ...);
+    list<pack...>::each(std::forward<decltype(lambda)>(lambda));
 }
 
 /// Iterate over a pack while a condition is true.
@@ -814,7 +826,7 @@ class clopts_impl<list<opts...>, list<special...>> {
     >>; // clang-format on
 
     /// Various types.
-    using help_string_t = static_string<1024 * sizeof...(opts)>;
+    using help_string_t = static_string<1024 + 1024 * sizeof...(opts)>; // Size should be ‘big enough’™.
     using optvals_tuple_t = std::tuple<storage_type_t<opts>...>;
     using string = std::string;
     using integer = int64_t;
@@ -961,22 +973,24 @@ private:
 
     /// Create the help message.
     static constexpr auto make_help_message() -> help_string_t { // clang-format off
+        using positional = filter<is_positional, opts...>;
+        using non_positional = filter<is_not_positional, opts...>;
         help_string_t msg{};
 
         /// Append the positional options.
-        Foreach<opts...>([&]<typename opt> () {
-            if constexpr (detail::is_positional_v<opt>) {
-                msg.append("<");
-                msg.append(opt::name.arr, opt::name.len);
-                msg.append("> ");
-            }
+        bool have_positional_opts = false;
+        positional::each([&]<typename opt> {
+            have_positional_opts = true;
+            if (not opt::is_required) msg.append("[");
+            msg.append("<");
+            msg.append(opt::name.arr, opt::name.len);
+            msg.append(">");
+            if (not opt::is_required) msg.append("]");
+            msg.append(" ");
         });
 
         /// End of first line.
         msg.append("[options]\n");
-
-        /// Start of options list.
-        msg.append("Options:\n");
 
         /// Determine the length of the longest name + typename so that
         /// we know how much padding to insert before actually printing
@@ -984,55 +998,76 @@ private:
         /// space after the option name, as well as the type name.
         size_t max_vals_opt_name_len{};
         size_t max_len{};
-        auto determine_length = [&]<typename opt> {
+        Foreach<opts...>([&]<typename opt> {
             if constexpr (opt::is_values)
                 max_vals_opt_name_len = std::max(max_vals_opt_name_len, opt::name.len);
 
-            /// Positional options go on the first line, so ignore them here.
-            if constexpr (not detail::is_positional_v<opt>) {
-                if constexpr (detail::should_print_argument_type<opt>) {
-                    auto n = type_name<typename opt::canonical_type>();
-                    max_len = std::max(max_len, opt::name.len + (n.len + sizeof("<> ") - 1));
-                } else {
-                    max_len = std::max(max_len, opt::name.len);
-                }
+            // If we’re printing the type, we have the following formats:
+            //
+            //     name <type>    Description
+            //     <name> : type  Description
+            //
+            // Apart from the type name, we also need to account for the extra
+            // ' <>' of normal options, and for the extra '<>' as well as the
+            // ' : ' of positional options.
+            if constexpr (should_print_argument_type<opt>) {
+                auto n = type_name<typename opt::canonical_type>();
+                max_len = std::max(
+                    max_len,
+                    opt::name.len + n.len + (is_positional_v<opt> ? 5 : 3)
+                );
             }
-        };
-        (determine_length.template operator()<opts>(), ...);
 
-        /// Append the options
-        auto append = [&] <typename opt> {
-            /// Positional options have already been handled.
-            if constexpr (not detail::is_positional_v<opt>) {
-                /// Append the name.
-                msg.append("    ");
-                msg.append(opt::name.arr, opt::name.len);
-
-                /// Compute the padding for this option and append the type name.
-                size_t len = opt::name.len;
-                if constexpr (detail::should_print_argument_type<opt>) {
-                    const auto tname = type_name<typename opt::canonical_type>();
-                    len += (3 + tname.len);
-                    msg.append(" <");
-                    msg.append(tname.arr, tname.len);
-                    msg.append(">");
-                }
-
-                /// Append the padding.
-                for (size_t i = 0; i < max_len - len; i++) msg.append(" ");
-
-                /// Append the description.
-                msg.append("  ");
-                msg.append(opt::description.arr, opt::description.len);
-                msg.append("\n");
+            // Otherwise, we only care about the name of the option and the
+            // extra '<>' of positional options.
+            else {
+                if constexpr (is_positional_v<opt>) max_len = std::max(max_len, opt::name.len + 2);
+                else max_len = std::max(max_len, opt::name.len);
             }
+        });
+
+        /// Append an argument.
+        auto append = [&]<typename opt> {
+            msg.append("    ");
+            auto old_len = msg.size();
+
+            // Append name.
+            if constexpr (is_positional_v<opt>) msg.append("<");
+            msg.append(opt::name.arr, opt::name.len);
+            if constexpr (is_positional_v<opt>) msg.append(">");
+
+            // Append type.
+            if constexpr (should_print_argument_type<opt>) {
+                auto tname = type_name<typename opt::canonical_type>();
+                msg.append(" : ");
+                msg.append(tname.arr, tname.len);
+            }
+
+            // Align to right margin.
+            auto len = msg.size() - old_len;
+            for (size_t i = 0; i < max_len - len; i++) msg.append(" ");
+
+            // Two extra spaces between this and the description.
+            msg.append("  ");
+            msg.append(opt::description.arr, opt::description.len);
+            msg.append("\n");
         };
-        (append.template operator()<opts>(), ...);
+
+        /// Append the descriptions of positional options.
+        if (have_positional_opts) {
+            msg.append("\nArguments:\n");
+            positional::each(append);
+            msg.append("\n");
+        }
+
+        /// Append non-positional options.
+        msg.append("Options:\n");
+        non_positional::each(append);
 
         /// If we have any values<> types, print their supported values.
         if constexpr ((opts::is_values or ...)) {
             msg.append("\nSupported option values:\n");
-            auto write_opt_vals = [&] <typename opt> () {
+            Foreach<opts...>([&] <typename opt> {
                 if constexpr (opt::is_values) {
                     msg.append("    ");
                     msg.append(opt::name.arr, opt::name.len);
@@ -1046,10 +1081,8 @@ private:
                     msg.len += opt::print_values(msg.arr + msg.len);
                     msg.append("\n");
                 }
-            };
-            (write_opt_vals.template operator()<opts>(), ...);
+            });
         }
-
 
         /// Return the combined help message.
         return msg;
