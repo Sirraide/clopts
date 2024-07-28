@@ -44,61 +44,9 @@ namespace command_line_options {
 namespace detail {
 using namespace std::literals;
 
-// clang-format off
-// Some compilers do not have __builtin_strlen().
-#if defined __GNUC__ || defined __clang__
-#    define CLOPTS_STRLEN(str)  __builtin_strlen(str)
-#    define CLOPTS_STRCMP(a, b) __builtin_strcmp(a, b)
-#else
-constexpr inline std::size_t CLOPTS_STRLEN(const char* str) {
-    std::size_t len = 0;
-    while (*str++) ++len;
-    return len;
-}
-
-constexpr inline int CLOPTS_STRCMP(const char* a, const char* b) {
-    while (*a && *b && *a == *b) {
-        ++a;
-        ++b;
-    }
-    return *a - *b;
-}
-
-#    define CLOPTS_STRLEN(str)  ::command_line_options::detail::CLOPTS_STRLEN(str)
-#    define CLOPTS_STRCMP(a, b) ::command_line_options::detail::CLOPTS_STRCMP(a, b)
-#endif
-
-/// Raise a compile-time error.
-#ifndef CLOPTS_ERR
-#    define CLOPTS_ERR(msg) [] <bool _x = false> { static_assert(_x, msg); } ()
-#endif
-
-/// Constexpr to_string for integers. Returns the number of bytes written.
-constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
-    // Special handling for 0.
-    if (i == 0) {
-        *out = '0';
-        return 1;
-    }
-
-    const auto start = out;
-    if (i < 0) {
-        *out++ = '-';
-        i = -i;
-    }
-
-    while (i) {
-        *out++ = char('0' + char(i % 10));
-        i /= 10;
-    }
-
-    std::reverse(start, out);
-    return std::size_t(out - start);
-}
-
-/// Empty type.
-struct empty {};
-
+// ===========================================================================
+//  Metaprogramming Helpers.
+// ===========================================================================
 /// List of types.
 template <typename ...pack> struct list {
     /// Apply a function to each element of the list.
@@ -106,6 +54,92 @@ template <typename ...pack> struct list {
         (lambda.template operator()<pack>(), ...);
     }
 };
+
+// TODO: Use pack indexing once the syntax is fixed and compilers
+// have actually started defining __cpp_pack_indexing.
+template <std::size_t i, typename... pack>
+using nth_type = std::tuple_element_t<i, std::tuple<pack...>>;
+
+/// Filter a pack of types.
+template <template <typename> typename, typename...>
+struct filter_impl;
+
+template < // clang-format off
+    template <typename> typename cond,
+    typename ...processed,
+    typename next,
+    typename ...rest
+> struct filter_impl<cond, list<processed...>, next, rest...> {
+    using type = std::conditional_t<cond<next>::value,
+        typename filter_impl<cond, list<processed..., next>, rest...>::type,
+        typename filter_impl<cond, list<processed...>, rest...>::type
+    >;
+}; // clang-format on
+
+template <template <typename> typename cond, typename... processed>
+struct filter_impl<cond, list<processed...>> {
+    using type = list<processed...>;
+};
+
+template <template <typename> typename cond, typename... types>
+using filter = typename filter_impl<cond, list<>, types...>::type;
+
+/// See that one talk (by Daisy Hollman, I think) about how this works.
+template <template <typename> typename get_key, typename... types>
+struct sort_impl {
+private:
+    static constexpr auto sorter = []<std::size_t ...i>(std::index_sequence<i...>) {
+        static constexpr auto sorted = [] {
+            std::array indices{i...};
+            std::array lookup_table{get_key<types>::value...};
+            std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
+                return lookup_table[a] < lookup_table[b];
+            });
+            return indices;
+        }();
+        return list<nth_type<sorted[i], types...>...>{};
+    };
+
+public:
+    using type = decltype(sorter(std::index_sequence_for<types...>()));
+};
+
+template <template <typename> typename get_key, typename... types>
+struct sort_impl<get_key, list<types...>> {
+    using type = typename sort_impl<get_key, types...>::type;
+};
+
+// Special case because an array of size 0 is not going to work...
+template <template <typename> typename get_key>
+struct sort_impl<get_key, list<>> { using type = list<>; };
+
+/// Sort a type list. The trick here is to sort the indices.
+template <template <typename> typename get_key, typename type_list>
+using sort = typename sort_impl<get_key, type_list>::type;
+
+/// Iterate over a pack while a condition is true.
+template <typename... pack>
+constexpr void Foreach(auto&& lambda) {
+    list<pack...>::each(std::forward<decltype(lambda)>(lambda));
+}
+
+/// Iterate over a pack while a condition is true.
+template <typename... pack>
+constexpr void While(bool& cond, auto&& lambda) {
+    auto impl = [&]<typename t>() -> bool {
+        if (not cond) return false;
+        lambda.template operator()<t>();
+        return true;
+    };
+
+    (impl.template operator()<pack>() and ...);
+}
+
+// ===========================================================================
+//  Type Traits and Metaprogramming Types.
+// ===========================================================================
+/// Empty type.
+struct empty {};
 
 /// Check if two types are the same.
 template <typename a, typename ...bs>
@@ -247,6 +281,60 @@ struct at_scope_exit {
 /// do not constitute actual options in an of themselves.
 struct special_tag;
 
+// ===========================================================================
+//  Compile-Time String.
+// ===========================================================================
+// Some compilers do not have __builtin_strlen().
+#if defined __GNUC__ || defined __clang__
+#    define CLOPTS_STRLEN(str)  __builtin_strlen(str)
+#    define CLOPTS_STRCMP(a, b) __builtin_strcmp(a, b)
+#else
+constexpr inline std::size_t CLOPTS_STRLEN(const char* str) {
+    std::size_t len = 0;
+    while (*str++) ++len;
+    return len;
+}
+
+constexpr inline int CLOPTS_STRCMP(const char* a, const char* b) {
+    while (*a && *b && *a == *b) {
+        ++a;
+        ++b;
+    }
+    return *a - *b;
+}
+
+#    define CLOPTS_STRLEN(str)  ::command_line_options::detail::CLOPTS_STRLEN(str)
+#    define CLOPTS_STRCMP(a, b) ::command_line_options::detail::CLOPTS_STRCMP(a, b)
+#endif
+
+/// Raise a compile-time error.
+#ifndef CLOPTS_ERR
+#    define CLOPTS_ERR(msg) [] <bool _x = false> { static_assert(_x, msg); } ()
+#endif
+
+/// Constexpr to_string for integers. Returns the number of bytes written.
+constexpr std::size_t constexpr_to_string(char* out, std::int64_t i) {
+    // Special handling for 0.
+    if (i == 0) {
+        *out = '0';
+        return 1;
+    }
+
+    const auto start = out;
+    if (i < 0) {
+        *out++ = '-';
+        i = -i;
+    }
+
+    while (i) {
+        *out++ = char('0' + char(i % 10));
+        i /= 10;
+    }
+
+    std::reverse(start, out);
+    return std::size_t(out - start);
+}
+
 /// Compile-time string.
 template <size_t sz>
 struct static_string {
@@ -324,6 +412,9 @@ struct string_or_int {
 
 string_or_int(std::int64_t) -> string_or_int<1>;
 
+// ===========================================================================
+//  Types.
+// ===========================================================================
 /// Struct for storing allowed option values.
 template <typename _type, auto... data>
 struct values_impl {
@@ -418,6 +509,9 @@ using option_type_t = typename option_type<_type>::type;
 template <typename _type>
 concept is_values_type_t = option_type<_type>::is_values;
 
+// ===========================================================================
+//  Option Implementation.
+// ===========================================================================
 template <
     static_string _name,
     static_string _description,
@@ -478,6 +572,9 @@ struct opt_impl {
     constexpr opt_impl() = delete;
 };
 
+// ===========================================================================
+//  Parser Helpers.
+// ===========================================================================
 /// Default help handler.
 [[noreturn]] inline void default_help_handler(std::string_view program_name, std::string_view msg) {
     std::cerr << "Usage: " << program_name << " " << msg;
@@ -550,31 +647,36 @@ static file_data_type map_file(
     return dat;
 }
 
-// ===========================================================================
-//  Helper functions to process parameters packs.
-// ===========================================================================
-/// Iterate over a pack while a condition is true.
-template <typename... pack>
-constexpr void Foreach(auto&& lambda) {
-    list<pack...>::each(std::forward<decltype(lambda)>(lambda));
+/// Get the name of an option type.
+template <typename t>
+static consteval auto type_name() -> static_string<25> {
+    static_string<25> buffer;
+    if constexpr (detail::is<t, std::string>) buffer.append("string");
+    else if constexpr (detail::is<t, bool>) buffer.append("bool");
+    else if constexpr (detail::is<t, std::int64_t, double>) buffer.append("number");
+    else if constexpr (requires { t::is_file_data; }) buffer.append("file");
+    else if constexpr (detail::is_callback<t>) buffer.append("arg");
+    else if constexpr (detail::is_vector_v<t>) {
+        buffer.append(type_name<typename t::value_type>().arr, type_name<typename t::value_type>().len);
+        buffer.append("s");
+    } else {
+        CLOPTS_ERR("Option type must be std::string, bool, integer, double, or void(*)(), or a vector thereof");
+    }
+    return buffer;
 }
 
-/// Iterate over a pack while a condition is true.
-template <typename... pack>
-constexpr void While(bool& cond, auto&& lambda) {
-    auto impl = [&]<typename t>() -> bool {
-        if (not cond) return false;
-        lambda.template operator()<t>();
-        return true;
-    };
+// ===========================================================================
+//  Sort/filter helpers.
+// ===========================================================================
+template <typename opt>
+struct get_option_name {
+    static constexpr std::string_view value = opt::name.sv();
+};
 
-    (impl.template operator()<pack>() and ...);
-}
-
-// TODO: Use pack indexing once the syntax is fixed and compilers
-// have actually started defining __cpp_pack_indexing.
-template <std::size_t i, typename... pack>
-using nth_type = std::tuple_element_t<i, std::tuple<pack...>>;
+template <typename opt>
+struct is_values_option {
+    static constexpr bool value = opt::is_values;
+};
 
 /// Check if an option is a regular option.
 template <typename opt>
@@ -588,79 +690,9 @@ struct special_option {
     static constexpr bool value = not regular_option<opt>::value;
 };
 
-/// Filter a pack of types.
-template <template <typename> typename, typename...>
-struct filter_impl;
-
-template < // clang-format off
-    template <typename> typename cond,
-    typename ...processed,
-    typename next,
-    typename ...rest
-> struct filter_impl<cond, list<processed...>, next, rest...> {
-    using type = std::conditional_t<cond<next>::value,
-        typename filter_impl<cond, list<processed..., next>, rest...>::type,
-        typename filter_impl<cond, list<processed...>, rest...>::type
-    >;
-}; // clang-format on
-
-template <template <typename> typename cond, typename... processed>
-struct filter_impl<cond, list<processed...>> {
-    using type = list<processed...>;
-};
-
-template <template <typename> typename cond, typename... types>
-using filter = typename filter_impl<cond, list<>, types...>::type;
-
-/// See that one talk (by Daisy Hollman, I think) about how this works.
-template <template <typename> typename get_key, typename... types>
-struct sort_impl {
-private:
-    static constexpr auto sorter = []<std::size_t ...i>(std::index_sequence<i...>) {
-        static constexpr auto sorted = [] {
-            std::array indices{i...};
-            std::array lookup_table{get_key<types>::value...};
-            std::sort(indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
-                return lookup_table[a] < lookup_table[b];
-            });
-            return indices;
-        }();
-        return list<nth_type<sorted[i], types...>...>{};
-    };
-
-public:
-    using type = decltype(sorter(std::index_sequence_for<types...>()));
-};
-
-template <template <typename> typename get_key, typename... types>
-struct sort_impl<get_key, list<types...>> {
-    using type = typename sort_impl<get_key, types...>::type;
-};
-
-// Special case because an array of size 0 is not going to work...
-template <template <typename> typename get_key>
-struct sort_impl<get_key, list<>> { using type = list<>; };
-
-/// Sort a type list. The trick here is to sort the indices.
-template <template <typename> typename get_key, typename type_list>
-using sort = typename sort_impl<get_key, type_list>::type;
-
-/// ===========================================================================
-///  Sort/filter helpers.
-/// ===========================================================================
-template <typename opt>
-struct get_option_name {
-    static constexpr std::string_view value = opt::name.sv();
-};
-
-template <typename opt>
-struct is_values_option {
-    static constexpr bool value = opt::is_values;
-};
-
-/// ===========================================================================
-///  Main implementation.
-/// ===========================================================================
+// ===========================================================================
+//  Main Implementation.
+// ===========================================================================
 template <typename... opts>
 class clopts_impl;
 
@@ -674,9 +706,9 @@ class clopts_impl<list<opts...>, list<special...>> {
     clopts_impl& operator=(const clopts_impl& o) = delete;
     clopts_impl& operator=(clopts_impl&& o) = delete;
 
-    /// =======================================================================
-    ///  Option access by name.
-    /// =======================================================================
+    // =======================================================================
+    //  Option Access by Name.
+    // =======================================================================
     /// Option names.
     static constexpr std::array<const char*, sizeof...(opts)> opt_names{opts::name.arr...};
 
@@ -714,6 +746,19 @@ class clopts_impl<list<opts...>, list<special...>> {
         constexpr size_t sz = optindex_impl<0, option>();
         assert_valid_option_name<(sz < sizeof...(opts)), option>();
         return sz;
+    }
+
+    /// Get an option by name.
+    // TODO: Use pack indexing once the syntax is fixed and compilers
+    // have actually started defining __cpp_pack_indexing.
+    template <static_string name>
+    using opt_by_name = nth_type<optindex<name>(), opts...>;
+
+    // I hate not having pack indexing.
+    template <std::size_t i, static_string str, static_string... strs>
+    static constexpr auto nth_str() {
+        if constexpr (i == 0) return str;
+        else return nth_str<i - 1, strs...>();
     }
 
     // =======================================================================
@@ -805,19 +850,9 @@ class clopts_impl<list<opts...>, list<special...>> {
     static_assert(validate_multiple() <= 1, "Cannot have more than one multiple<positional<>> option");
     static_assert(validate_references(), "All options with a ref<> type must reference an existing non-ref option");
 
-    /// Get an option by name.
-    // TODO: Use pack indexing once the syntax is fixed and compilers
-    // have actually started defining __cpp_pack_indexing.
-    template <static_string name>
-    using opt_by_name = nth_type<optindex<name>(), opts...>;
-
-    // I hate not having pack indexing.
-    template <std::size_t i, static_string str, static_string... strs>
-    static constexpr auto nth_str() {
-        if constexpr (i == 0) return str;
-        else return nth_str<i - 1, strs...>();
-    }
-
+    // =======================================================================
+    //  Option Storage.
+    // =======================================================================
     template <typename opt>
     struct storage_type;
 
@@ -891,29 +926,9 @@ class clopts_impl<list<opts...>, list<special...>> {
 public:
     using error_handler_t = std::function<bool(std::string&&)>;
 
-private:
-    /// =======================================================================
-    ///  Option access.
-    /// =======================================================================
-    /// Get the name of an option type.
-    template <typename t>
-    static consteval auto type_name() -> static_string<25> {
-        static_string<25> buffer;
-        if constexpr (detail::is<t, string>) buffer.append("string");
-        else if constexpr (detail::is<t, bool>) buffer.append("bool");
-        else if constexpr (detail::is<t, integer, double>) buffer.append("number");
-        else if constexpr (requires { t::is_file_data; }) buffer.append("file");
-        else if constexpr (detail::is_callback<t>) buffer.append("arg");
-        else if constexpr (detail::is_vector_v<t>) {
-            buffer.append(type_name<typename t::value_type>().arr, type_name<typename t::value_type>().len);
-            buffer.append("s");
-        } else {
-            CLOPTS_ERR("Option type must be std::string, bool, integer, double, or void(*)(), or a vector thereof");
-        }
-        return buffer;
-    }
-
-public:
+    // =======================================================================
+    //  Option Access.
+    // =======================================================================
     /// Result type.
     class optvals_type {
         friend clopts_impl;
@@ -994,6 +1009,9 @@ public:
     };
 
 private:
+    // =======================================================================
+    //  Parser State.
+    // =======================================================================
     /// Variables for the parser and for storing parsed options.
     optvals_type optvals{};
     bool has_error = false;
@@ -1003,13 +1021,102 @@ private:
     void* user_data{};
     error_handler_t error_handler{};
 
+    // =======================================================================
+    //  Helpers.
+    // =======================================================================
+    /// Error handler that is used if the user doesn’t provide one.
+    bool default_error_handler(std::string&& errmsg) {
+        auto name = program_name();
+        if (not name.empty()) std::cerr << name << ": ";
+        std::cerr << errmsg << "\n";
+
+        // Invoke the help option.
+        bool invoked = false;
+        auto invoke = [&]<typename opt> {
+            if constexpr (requires { opt::is_help_option; }) {
+                invoked = true;
+                invoke_help_callback<opt>();
+            }
+        };
+
+        // If there is a help option, invoke it.
+        (invoke.template operator()<opts>(), ...);
+
+        // If no help option was found, print the help message.
+        if (not invoked) {
+            std::cerr << "Usage: ";
+            if (not name.empty()) std::cerr << name << " ";
+            std::cerr << help();
+        }
+
+        std::exit(1);
+    }
+
+    /// Invoke the error handler and set the error flag.
+    void handle_error(auto first, auto&&... msg_parts) {
+        // Append the message parts.
+        std::string msg = std::string{std::move(first)};
+        ((msg += std::forward<decltype(msg_parts)>(msg_parts)), ...);
+
+        // Dispatch the error.
+        has_error = not error_handler(std::move(msg));
+    }
+
+    /// Invoke the help callback of the help option.
+    template <typename opt>
+    void invoke_help_callback() {
+        // New API: program name + help message [+ user data].
+        using sv = std::string_view;
+        if constexpr (requires { opt::help_callback(sv{}, sv{}, user_data); })
+            opt::help_callback(sv{program_name()}, sv{}, user_data);
+        else if constexpr (requires { opt::help_callback(sv{}, sv{}); })
+            opt::help_callback(sv{program_name()}, help_message_raw.sv());
+
+        // Compatibility for callbacks that don’t take the program name.
+        else if constexpr (requires { opt::help_callback(sv{}, user_data); })
+            opt::help_callback(help_message_raw.sv(), user_data);
+        else if constexpr (requires { opt::help_callback(sv{}); })
+            opt::help_callback(help_message_raw.sv());
+
+        // Invalid help option callback.
+        else static_assert(
+            detail::always_false<opt>,
+            "Invalid help option signature. Consult the README for more information"
+        );
+    }
+
+    /// Helper to parse an integer or double.
+    template <typename number_type, static_string name>
+    auto parse_number(std::string_view s, auto parse_func) -> number_type {
+        number_type i{};
+
+        // The empty string is a valid integer *and* float, apparently.
+        if (s.empty()) {
+            handle_error("Expected ", name.sv(), ", got empty string");
+            return i;
+        }
+
+        // Parse the number.
+        errno = 0;
+        char* pos{};
+        if constexpr (requires { parse_func(s.data(), &pos, 10); }) i = number_type(parse_func(s.data(), &pos, 10));
+        else i = number_type(parse_func(s.data(), &pos));
+        if (errno != 0 or *pos) handle_error(s, " does not appear to be a valid ", name.sv());
+        return i;
+    }
+
+    /// Get the program name, if available.
+    auto program_name() const -> std::string_view {
+        if (argv) return argv[0];
+        return {};
+    }
+
+    // =======================================================================
+    //  Internal Option Access.
+    // =======================================================================
     /// Check if an option was found.
     template <static_string option>
     bool found() { return optvals.opts_found[optindex<option>()]; }
-
-    /// Mark an option as found.
-    template <static_string option>
-    void set_found() { optvals.opts_found[optindex<option>()] = true; }
 
     /// Get a reference to an option value.
     template <static_string s>
@@ -1026,6 +1133,21 @@ private:
         else return std::get<optindex<s>()>(optvals.optvals);
     }
 
+    /// Mark an option as found.
+    template <static_string option>
+    void set_found() { optvals.opts_found[optindex<option>()] = true; }
+
+    /// Store an option value.
+    template <bool is_multiple>
+    void store_option_value(auto& ref, auto value) {
+        // Set the value.
+        if constexpr (is_multiple) ref.push_back(std::move(value));
+        else ref = std::move(value);
+    }
+
+    // =======================================================================
+    //  Help Message.
+    // =======================================================================
     /// Create the help message.
     static constexpr auto make_help_message() -> help_string_t { // clang-format off
         using positional_unsorted = filter<is_positional, opts...>;
@@ -1159,20 +1281,9 @@ public:
     }
 
 private:
-    /// Get the program name, if available.
-    auto program_name() const -> std::string_view {
-        if (argv) return argv[0];
-        return {};
-    }
-
-    /// Store an option value.
-    template <bool is_multiple>
-    void store_option_value(auto& ref, auto value) {
-        // Set the value.
-        if constexpr (is_multiple) ref.push_back(std::move(value));
-        else ref = std::move(value);
-    }
-
+    // =======================================================================
+    //  References.
+    // =======================================================================
     /// Add a referenced option to a tuple.
     template <std::size_t index, static_string name>
     void add_referenced_option(auto& tuple) {
@@ -1204,6 +1315,9 @@ private:
         return tuple;
     }
 
+    // =======================================================================
+    //  Parsing and Dispatch.
+    // =======================================================================
     /// Handle an option value.
     template <typename opt, bool is_multiple>
     void dispatch_option_with_arg(std::string_view opt_str, std::string_view opt_val) {
@@ -1248,109 +1362,6 @@ private:
                 store_option_value<is_multiple>(storage, std::move(value));
             }
         }
-    }
-
-    /// Invoke the help callback of the help option.
-    template <typename opt>
-    void invoke_help_callback() {
-        // New API: program name + help message [+ user data].
-        using sv = std::string_view;
-        if constexpr (requires { opt::help_callback(sv{}, sv{}, user_data); })
-            opt::help_callback(sv{program_name()}, sv{}, user_data);
-        else if constexpr (requires { opt::help_callback(sv{}, sv{}); })
-            opt::help_callback(sv{program_name()}, help_message_raw.sv());
-
-        // Compatibility for callbacks that don’t take the program name.
-        else if constexpr (requires { opt::help_callback(sv{}, user_data); })
-            opt::help_callback(help_message_raw.sv(), user_data);
-        else if constexpr (requires { opt::help_callback(sv{}); })
-            opt::help_callback(help_message_raw.sv());
-
-        // Invalid help option callback.
-        else static_assert(
-            detail::always_false<opt>,
-            "Invalid help option signature. Consult the README for more information"
-        );
-    }
-
-    /// Error handler that is used if the user doesn’t provide one.
-    bool default_error_handler(std::string&& errmsg) {
-        auto name = program_name();
-        if (not name.empty()) std::cerr << name << ": ";
-        std::cerr << errmsg << "\n";
-
-        // Invoke the help option.
-        bool invoked = false;
-        auto invoke = [&]<typename opt> {
-            if constexpr (requires { opt::is_help_option; }) {
-                invoked = true;
-                invoke_help_callback<opt>();
-            }
-        };
-
-        // If there is a help option, invoke it.
-        (invoke.template operator()<opts>(), ...);
-
-        // If no help option was found, print the help message.
-        if (not invoked) {
-            std::cerr << "Usage: ";
-            if (not name.empty()) std::cerr << name << " ";
-            std::cerr << help();
-        }
-
-        std::exit(1);
-    }
-
-    /// Invoke the error handler and set the error flag.
-    void handle_error(auto first, auto&&... msg_parts) {
-        // Append the message parts.
-        std::string msg = std::string{std::move(first)};
-        ((msg += std::forward<decltype(msg_parts)>(msg_parts)), ...);
-
-        // Dispatch the error.
-        has_error = not error_handler(std::move(msg));
-    }
-
-    /// Helper to parse an integer or double.
-    template <typename number_type, static_string name>
-    auto parse_number(std::string_view s, auto parse_func) -> number_type {
-        number_type i{};
-
-        // The empty string is a valid integer *and* float, apparently.
-        if (s.empty()) {
-            handle_error("Expected ", name.sv(), ", got empty string");
-            return i;
-        }
-
-        // Parse the number.
-        errno = 0;
-        char* pos{};
-        if constexpr (requires { parse_func(s.data(), &pos, 10); }) i = number_type(parse_func(s.data(), &pos, 10));
-        else i = number_type(parse_func(s.data(), &pos));
-        if (errno != 0 or *pos) handle_error(s, " does not appear to be a valid ", name.sv());
-        return i;
-    }
-
-    /// Parse an option value.
-    template <typename opt>
-    auto make_arg(std::string_view opt_val) -> typename opt::single_element_type {
-        using element = typename opt::single_element_type;
-
-        // Make sure this option takes an argument.
-        if constexpr (not detail::has_argument<element>) CLOPTS_ERR("This option type does not take an argument");
-
-        // Strings do not require parsing.
-        else if constexpr (std::is_same_v<element, std::string>) return std::string{opt_val};
-
-        // If it’s a file, read its contents.
-        else if constexpr (requires { element::is_file_data; }) return detail::map_file<element>(opt_val, error_handler);
-
-        // Parse an integer or double.
-        else if constexpr (std::is_same_v<element, integer>) return parse_number<integer, "integer">(opt_val, std::strtoull);
-        else if constexpr (std::is_same_v<element, double>) return parse_number<double, "floating-point number">(opt_val, std::strtod);
-
-        // Should never get here.
-        else CLOPTS_ERR("Unreachable");
     }
 
     /// Handle an option that may take an argument.
@@ -1446,6 +1457,7 @@ private:
         else { return handle_opt_with_arg<opt, is_multiple>(opt_str); }
     }
 
+    /// Handle a positional option.
     template <typename opt>
     bool handle_positional_impl(std::string_view opt_str) {
         static_assert(not detail::is_callback<typename opt::canonical_type>, "positional<>s may not have a callback");
@@ -1481,6 +1493,28 @@ private:
         };
 
         return (handle.template operator()<opts>(opt_str) or ...);
+    }
+
+    /// Parse an option value.
+    template <typename opt>
+    auto make_arg(std::string_view opt_val) -> typename opt::single_element_type {
+        using element = typename opt::single_element_type;
+
+        // Make sure this option takes an argument.
+        if constexpr (not detail::has_argument<element>) CLOPTS_ERR("This option type does not take an argument");
+
+        // Strings do not require parsing.
+        else if constexpr (std::is_same_v<element, std::string>) return std::string{opt_val};
+
+        // If it’s a file, read its contents.
+        else if constexpr (requires { element::is_file_data; }) return detail::map_file<element>(opt_val, error_handler);
+
+        // Parse an integer or double.
+        else if constexpr (std::is_same_v<element, integer>) return parse_number<integer, "integer">(opt_val, std::strtoull);
+        else if constexpr (std::is_same_v<element, double>) return parse_number<double, "floating-point number">(opt_val, std::strtod);
+
+        // Should never get here.
+        else CLOPTS_ERR("Unreachable");
     }
 
     /// Check if we should stop parsing.
