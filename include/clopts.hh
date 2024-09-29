@@ -55,6 +55,16 @@ template <typename ...pack> struct list {
     }
 };
 
+/// Concatenate two type lists.
+template <typename, typename> struct concat_impl;
+template <typename ...Ts, typename ...Us>
+struct concat_impl<list<Ts...>, list<Us...>> {
+    using type = list<Ts..., Us...>;
+};
+
+template <typename T, typename U>
+using concat = typename concat_impl<T, U>::type;
+
 // TODO: Use pack indexing once the syntax is fixed and compilers
 // have actually started defining __cpp_pack_indexing.
 template <std::size_t i, typename... pack>

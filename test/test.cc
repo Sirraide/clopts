@@ -874,6 +874,11 @@ Supported option values:
     CHECK(options::help() == expected);
 }
 
+static_assert(std::is_same_v<
+    detail::concat<detail::list<int, double>, detail::list<char, short>>,
+    detail::list<int, double, char, short>
+>);
+
 /*TEST_CASE("Aliased options are equivalent") {
     using options = clopts<
         multiple<option<"--string", "A string", std::string>>,

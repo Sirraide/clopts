@@ -27,7 +27,7 @@ endif()
 
 if (NOT MSVC)
     target_compile_options(tests PRIVATE
-        -Wall -Wextra -Werror
+        -Wall -Wextra -Werror -Wno-c++26-extensions
         $<$<CONFIG:DEBUG>:-O0 -g3 -ggdb3 -fsanitize=address>
         $<$<CONFIG:RELEASE>:-O3 -march=native>
     )
