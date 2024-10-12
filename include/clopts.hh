@@ -81,9 +81,9 @@ template < // clang-format off
     typename ...rest
 > struct filter_impl<cond, list<processed...>, next, rest...> {
     using type = std::conditional_t<cond<next>::value,
-        typename filter_impl<cond, list<processed..., next>, rest...>::type,
-        typename filter_impl<cond, list<processed...>, rest...>::type
-    >;
+        filter_impl<cond, list<processed..., next>, rest...>,
+        filter_impl<cond, list<processed...>, rest...>
+    >::type;
 }; // clang-format on
 
 template <template <typename> typename cond, typename... processed>
@@ -910,8 +910,9 @@ class clopts_impl<list<opts...>, list<special...>> {
     struct storage_type {
         using type = std::conditional_t<
             opt::is_ref,
-            typename compute_ref_storage_type<typename opt::declared_type, typename opt::declared_type_base>::type,
-            typename opt::canonical_type>;
+            compute_ref_storage_type<typename opt::declared_type, typename opt::declared_type_base>,
+            std::type_identity<typename opt::canonical_type>
+        >::type;
     };
 
     /// The type returned to the user by 'get<>().
