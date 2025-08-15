@@ -995,14 +995,20 @@ public:
         ///
         /// \see get()
         template <static_string s>
-        constexpr auto get_or(auto default_) {
+        constexpr auto get(auto&& default_) {
             constexpr auto sz = optindex_impl<0, s>();
             if constexpr (sz < sizeof...(opts)) {
                 if (opts_found[optindex<s>()]) return *get_impl<s>();
-                return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(default_);
+                return static_cast<std::remove_cvref_t<decltype(*get_impl<s>())>>(std::forward<decltype(default_)>(default_));
             } else {
                 assert_valid_option_name<(sz < sizeof...(opts)), s>();
             }
+        }
+
+        template <static_string s>
+        [[deprecated("Use get(value) instead of get_or(value)")]]
+        constexpr decltype(auto) get_or(auto&& default_) {
+            return get<s>(std::forward<decltype(default_)>(default_));
         }
 
         /// \brief Get unprocessed options.

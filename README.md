@@ -28,18 +28,20 @@ library:
 ```c++
 #include <clopts.hh>
 
+namespace cmd {
 using namespace command_line_options;
 using options = clopts<
     option<"--repeat", "How many times the output should be repeated (default 1)", int64_t>,
     positional<"file", "The file whose contents should be printed", file<>, /*required=*/true>,
     help<>
 >;
+}
 
 int main(int argc, char** argv) {
-    auto opts = options::parse(argc, argv);
+    auto opts = cmd::options::parse(argc, argv);
 
     auto& file_contents = opts.get<"file">()->contents;
-    auto repeat_count = opts.get_or<"--repeat">(1);
+    auto repeat_count = opts.get<"--repeat">(/*default=*/1);
 
     for (std::int64_t i = 0; i < repeat_count; i++)
         std::cout << file_contents;
@@ -64,14 +66,14 @@ Options:
 Here’s another, more complicated example if you want to see more of the features of this library:
 ```c++
 #include <clopts.hh>
-using namespace command_line_options;
-
 static void print_number_and_exit(void* arg, std::string_view) {
     int* i = reinterpret_cast<int*>(arg);
     std::cout << *i;
     std::exit(0);
 }
 
+namespace cmd {
+using namespace command_line_options;
 using options = clopts<
     positional<"file", "The name of the file", file<std::vector<std::byte>>, true>,
     positional<"foobar", "[description goes here]", std::string, false>,
@@ -82,10 +84,11 @@ using options = clopts<
     func<"--func", "Print 42 and exit", print_number_and_exit>,
     help<>
 >;
+}
 
 int main(int argc, char** argv) {
     int number = 42;
-    auto opts = options::parse(argc, argv, nullptr, &number);
+    auto opts = cmd::options::parse(argc, argv, nullptr, &number);
 
     auto ints = opts.get<"--int">();
     if (ints.empty()) std::cout << "No ints!\n";
@@ -136,7 +139,7 @@ if (auto* size = opts.get<"--size">()) {
 Note that if no option with the name `--size` exists, you'll get a 
 compile-time error.
 
-Alternatively, the `get_or<>(value)` function can be used to get either the option value or a default value
+Alternatively, the `get<>(default_value)` overload can be used to get either the option value or a default value
 if the option wasn’t found. Note that this function creates a copy of the option value and may thus incur extra
 overhead if the option value happens to be a large string. If `value` is returned, it is first `static_cast` to
 the option type.
@@ -144,7 +147,7 @@ the option type.
 auto opts = options::parse(argc, argv);
 
 /// Default size is 10.
-std::cout << "Size: " << opts.get_or<"--size">(10) << "\n";
+std::cout << "Size: " << opts.get<"--size">(10) << "\n";
 ```
 
 ### Error Handling
@@ -376,12 +379,13 @@ multiple<option<"--int", "A number", int64_t>>
 ```
 Calling `get<>()` on a `multiple<option<>>` or `multiple<positional<>>` returns a (possibly empty) 
 `std::span` of the option result type instead (e.g in the case of the `--int` option above, it will return a 
-`std::span<int64_t>`). However, `get_or<>()` will still the return default value if the option wasn’t found.
+`std::span<int64_t>`). However, the overload of `get<>()` that takes a default value will still the return default 
+value if the option wasn’t found.
 
 #### **Properties**
 * If the wrapped option is marked as required, then it is required to be present at least once.
 * `multiple<>` options cannot be overridable.
-* `multiple<>` should only ever be used with `flag`s and `option`s.
+* `multiple<>` should only ever be used with `flag`/`option`/`positional`.
 * `multiple<func>` is currently invalid, as `func` options can already occur multiple times.
 * There can only be at most one `multiple<positional<>>` option.
 * `multiple<multiple<>>` is invalid.

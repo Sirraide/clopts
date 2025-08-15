@@ -798,7 +798,7 @@ TEST_CASE("Documentation compiles (example 1)") {
 
     auto opts = options::parse(args.size(), args.data(), error_handler);
     auto& file_contents = opts.get<"file">()->contents;
-    auto repeat_count = opts.get_or<"--repeat">(1);
+    auto repeat_count = opts.get<"--repeat">(1);
     std::string actual;
     for (std::int64_t i = 0; i < repeat_count; i++)
         actual += file_contents;
@@ -1024,6 +1024,21 @@ TEST_CASE("Option name must match exactly or be followed by '='") {
     };
 
     CHECK_THROWS(options::parse(args.size(), args.data(), error_handler));
+}
+
+TEST_CASE("get() with default") {
+    std::array args = { "test" };
+    auto opts = basic_options::parse(args.size(), args.data(), error_handler);
+    CHECK(opts.get<"--string">("foo") == "foo");
+    CHECK(opts.get<"--number">(42) == 42);
+    CHECK(opts.get<"--float">(3.141592653589) == 3.141592653589_a);
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    CHECK(opts.get_or<"--string">("foo") == "foo");
+    CHECK(opts.get_or<"--number">(42) == 42);
+    CHECK(opts.get_or<"--float">(3.141592653589) == 3.141592653589_a);
+#pragma clang diagnostic pop
 }
 
 /*TEST_CASE("Aliased options are equivalent") {
