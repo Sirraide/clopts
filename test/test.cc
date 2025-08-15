@@ -994,6 +994,38 @@ TEST_CASE("Stress test") {
     (void) options::parse(args.size(), args.data(), error_handler);
 }
 
+TEST_CASE("Check that we handle an option being a prefix of another option properly") {
+    using options = clopts<
+        help<>,
+        flag<"--ir", "">,
+        flag<"--ir-generic", "">
+    >;
+
+    std::array args = {
+        "test",
+        "--ir",
+        "--ir-generic",
+    };
+
+    auto opts = options::parse(args.size(), args.data(), error_handler);
+    CHECK(opts.get<"--ir">());
+    CHECK(opts.get<"--ir-generic">());
+}
+
+TEST_CASE("Option name must match exactly or be followed by '='") {
+    using options = clopts<
+        help<>,
+        option<"--ir", "">
+    >;
+
+    std::array args = {
+        "test",
+        "--irx",
+    };
+
+    CHECK_THROWS(options::parse(args.size(), args.data(), error_handler));
+}
+
 /*TEST_CASE("Aliased options are equivalent") {
     using options = clopts<
         multiple<option<"--string", "A string", std::string>>,

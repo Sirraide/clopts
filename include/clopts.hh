@@ -1145,8 +1145,24 @@ private:
     }
 
     /// Mark an option as found.
-    template <static_string option>
-    void set_found() { optvals.opts_found[optindex<option>()] = true; }
+    template <typename opt>
+    void set_found() {
+        // Check if this option accepts multiple values.
+        if constexpr (
+            not requires { opt::is_multiple; } and
+            not detail::is_callback<typename opt::single_element_type>
+        ) {
+            if (not opt::is_overridable and found<opt::name>()) {
+                std::string errmsg;
+                errmsg += "Duplicate option: \"";
+                errmsg += opt::name.sv();
+                errmsg += "\"";
+                handle_error(std::move(errmsg));
+            }
+        }
+
+        optvals.opts_found[optindex<opt::name>()] = true;
+    }
 
     /// Store an option value.
     template <bool is_multiple>
@@ -1335,7 +1351,7 @@ private:
         using canonical = typename opt::canonical_type;
 
         // Mark the option as found.
-        set_found<opt::name>();
+        set_found<opt>();
 
         // If this is a function option, simply call the callback and we're done.
         if constexpr (detail::is_callback<canonical>) {
@@ -1379,9 +1395,10 @@ private:
     ///
     /// Both --option value and --option=value are valid ways of supplying a
     /// value. We test for both of them.
-    template <typename opt, bool is_multiple>
-    bool handle_opt_with_arg(std::string_view opt_str) {
-        using canonical = typename opt::canonical_type;
+    template <typename opt>
+    bool handle_non_positional_with_arg(std::string_view opt_str) {
+        static constexpr bool is_multiple = requires { opt::is_multiple; };
+        if (not opt_str.starts_with(opt::name.sv())) return false;
 
         // --option=value or short opt.
         if (opt_str.size() > opt::name.len) {
@@ -1402,6 +1419,7 @@ private:
         // Handle the option. If we get here, we know that the option name that we’ve
         // encountered matches the option name exactly. If this is a func option that
         // doesn’t take arguments, just call the callback and we’re done.
+        using canonical = typename opt::canonical_type;
         if constexpr (detail::is<canonical, callback_noarg_type>) {
             opt::callback(user_data, opt_str);
             return true;
@@ -1421,51 +1439,26 @@ private:
         }
     }
 
-    /// Handle an option. The parser calls this on each non-positional option.
     template <typename opt>
-    bool handle_regular_impl(std::string_view opt_str) {
-        // If the supplied string doesn’t start with the option name, move on to the next option
-        if (not opt_str.starts_with(opt::name.sv())) return false;
+    bool handle_non_positional(std::string_view opt_str) {
+        // Check if the name of this flag matches the entire option string that
+        // we encountered. If we’re just a prefix, then we don’t handle this.
+        if (opt_str != opt::name.sv()) return false;
 
-        // Check if this option accepts multiple values.
-        using element = typename opt::single_element_type;
-        static constexpr bool is_multiple = requires { opt::is_multiple; };
-        if constexpr (not is_multiple and not detail::is_callback<element>) {
-            // Duplicate options are not allowed, unless they’re overridable.
-            if (not opt::is_overridable and found<opt::name>()) {
-                std::string errmsg;
-                errmsg += "Duplicate option: \"";
-                errmsg += opt_str;
-                errmsg += "\"";
-                handle_error(std::move(errmsg));
-                return false;
-            }
+        // Mark the option as found. That’s all we need to do for flags.
+        set_found<opt>();
+
+        // If it’s a callable, call it.
+        if constexpr (detail::is_callback<typename opt::single_element_type>) {
+            // The builtin help option is handled here. We pass the help message as an argument.
+            if constexpr (requires { opt::is_help_option; }) invoke_help_callback<opt>();
+
+            // If it’s not the help option, just invoke it.
+            else { opt::callback(user_data, opt_str); }
         }
 
-        // Flags and callbacks that don't have arguments.
-        if constexpr (not detail::has_argument<element>) {
-            // Check if the name of this flag matches the entire option string that
-            // we encountered. If we’re just a prefix, then we don’t handle this.
-            if (opt_str != opt::name.sv()) return false;
-
-            // Mark the option as found. That’s all we need to do for flags.
-            set_found<opt::name>();
-
-            // If it’s a callable, call it.
-            if constexpr (detail::is_callback<element>) {
-                // The builtin help option is handled here. We pass the help message as an argument.
-                if constexpr (requires { opt::is_help_option; }) invoke_help_callback<opt>();
-
-                // If it’s not the help option, just invoke it.
-                else { opt::callback(user_data, opt_str); }
-            }
-
-            // Option has been handled.
-            return true;
-        }
-
-        // Handle an option that may take an argument.
-        else { return handle_opt_with_arg<opt, is_multiple>(opt_str); }
+        // Option has been handled.
+        return true;
     }
 
     /// Handle a positional option.
@@ -1485,11 +1478,15 @@ private:
     }
 
     /// Invoke handle_regular_impl on every option until one returns true.
-    bool handle_regular(std::string_view opt_str) {
+    bool handle_non_positional(std::string_view opt_str) {
         const auto handle = [this]<typename opt>(std::string_view str) {
             // `this->` is to silence a warning.
             if constexpr (detail::is_positional_v<opt>) return false;
-            else return this->handle_regular_impl<opt>(str);
+            else {
+                using element = typename opt::single_element_type;
+                if constexpr (not detail::has_argument<element>) return this->handle_non_positional<opt>(str);
+                else return this->handle_non_positional_with_arg<opt>(str);
+            }
         };
 
         return (handle.template operator()<opts>(opt_str) or ...);
@@ -1547,7 +1544,7 @@ private:
             }
 
             // Attempt to handle the option.
-            if (not handle_regular(opt_str) and not handle_positional(opt_str)) {
+            if (not handle_non_positional(opt_str) and not handle_positional(opt_str)) {
                 std::string errmsg;
                 errmsg += "Unrecognized option: \"";
                 errmsg += opt_str;
