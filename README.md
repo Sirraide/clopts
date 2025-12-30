@@ -1,3 +1,5 @@
+# THIS LIBRARY HAS BEEN MERGED INTO https://github.com/Sirraide/libbase AS <base/Clopts.hh>
+
 # Info
 This is a type-safe, header-only compile-time **c**ommand **l**ine 
 **opt**ion**s** library that generates a parser and a formatted help 
